@@ -165,14 +165,63 @@ Add a row to the table at the top of this README, then commit and push.
 
 ---
 
-## Publishing changes
+## Releasing changes (author side)
 
-1. Make your edit.
-2. **Bump `version` in `.claude-plugin/plugin.json`** (semver — minor for new skills/agents, patch for fixes).
-3. `git commit` + `git push`.
-4. Users run `/plugin marketplace update claude-skills` then `/reload-plugins`.
+Every push that changes a skill or agent **must bump the plugin version** — otherwise installed clients silently miss the update (their cache is keyed by version).
 
-> Why the version bump matters: the installed plugin is cached at `~/.claude/plugins/cache/claude-skills/claude-skills/<version>/`. Without a bump, the cache stays stale and your edits aren't pulled, even after `marketplace update + reload-plugins`. If you forget and have a stale cache, the recovery is `/plugin uninstall claude-skills` then `/plugin install claude-skills@claude-skills`.
+```bash
+# 1. Edit the skill / agent / docs
+$EDITOR skills/your-thing/SKILL.md
+
+# 2. Bump the version in .claude-plugin/plugin.json
+#    - patch (0.2.0 → 0.2.1): edits to existing files
+#    - minor (0.2.0 → 0.3.0): new skill/agent or behavior change
+#    - major (0.2.0 → 1.0.0): breaking change to an existing skill
+
+# 3. Update the catalog table at the top of this README (only when adding/removing)
+
+# 4. Commit and push
+git add -A
+git commit -m "Describe the change"
+git push
+```
+
+That's it from the author side. No tag, no release process, no marketplace submission — the marketplace.json in this repo points at `main`.
+
+## Pulling updates (user side)
+
+In any Claude Code session:
+
+```
+/plugin marketplace update claude-skills
+/reload-plugins
+```
+
+That should be enough — the marketplace catalog refresh sees the new version, and reload pulls the matching cache.
+
+**If the new content doesn't show up** (the cache is stuck at the old version), do a forced reinstall:
+
+```
+/plugin uninstall claude-skills
+/plugin install claude-skills@claude-skills
+/reload-plugins
+```
+
+## Verifying an update worked
+
+The reload counter (`Reloaded: 1 plugin · 0 skills · 7 agents`) is misleading — don't trust it. Use one of these instead:
+
+**Shell — authoritative ground truth:**
+
+```bash
+ls ~/.claude/plugins/cache/claude-skills/claude-skills/*/{skills,agents} 2>/dev/null
+```
+
+Shows the version directory and every skill / agent the cache contains. If it matches what's on `main`, you're up to date.
+
+**In-session:**
+
+The skill picker (`/` menu) and the `<system-reminder>` available-skills list include every loaded skill, namespaced as `claude-skills:<name>`. Six of those = all skills loaded. The `coder` agent shows up when you ask Claude to delegate to it.
 
 ---
 
