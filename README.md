@@ -168,12 +168,11 @@ Add a row to the table at the top of this README, then commit and push.
 ## Publishing changes
 
 1. Make your edit.
-2. `git commit` + `git push`.
-3. Users run `/plugin marketplace update claude-skills` then `/reload-plugins`.
+2. **Bump `version` in `.claude-plugin/plugin.json`** (semver — minor for new skills/agents, patch for fixes).
+3. `git commit` + `git push`.
+4. Users run `/plugin marketplace update claude-skills` then `/reload-plugins`.
 
-No version bump or release process needed — the marketplace pulls the latest commit on `main`.
-
-For a versioned release, bump `version` in `.claude-plugin/plugin.json` and tag the commit.
+> Why the version bump matters: the installed plugin is cached at `~/.claude/plugins/cache/claude-skills/claude-skills/<version>/`. Without a bump, the cache stays stale and your edits aren't pulled, even after `marketplace update + reload-plugins`. If you forget and have a stale cache, the recovery is `/plugin uninstall claude-skills` then `/plugin install claude-skills@claude-skills`.
 
 ---
 
