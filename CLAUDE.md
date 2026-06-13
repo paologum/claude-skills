@@ -28,22 +28,23 @@ agents/              # subagents delegated to via the Agent tool
 
 ## Install
 
-**Local development (this machine, any project):**
+Inside any Claude Code session:
+
+```
+/plugin marketplace add paologum/claude-skills
+/plugin install claude-skills@claude-skills
+/reload-plugins
+```
+
+This repo is both a plugin (`.claude-plugin/plugin.json`) and a one-plugin marketplace (`.claude-plugin/marketplace.json`), so `marketplace add` + `install` point at the same repo.
+
+**Local dev (load without installing):**
 
 ```bash
 claude --plugin-dir /Users/paologum/github
 ```
 
-**From a marketplace repo (other machines):**
-
-```bash
-# inside Claude Code
-/plugin marketplace add paologum/<marketplace-repo>
-/plugin install paologum-skills@<marketplace-name>
-/reload-plugins
-```
-
-The marketplace repo is a separate repo containing `.claude-plugin/marketplace.json` that points at this plugin. Not set up yet — for now, use `--plugin-dir` or clone this repo into `~/.claude/plugins/`.
+Session-only — not persistent.
 
 ## Adding a skill
 

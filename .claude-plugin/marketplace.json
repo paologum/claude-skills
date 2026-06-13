@@ -1,0 +1,13 @@
+{
+  "name": "claude-skills",
+  "owner": {
+    "name": "paologum"
+  },
+  "plugins": [
+    {
+      "name": "claude-skills",
+      "source": "./",
+      "description": "Personal collection of Claude Code skills and subagents."
+    }
+  ]
+}
