@@ -13,6 +13,7 @@ A personal collection of [Claude Code](https://claude.com/claude-code) skills an
 | Skill | `/unity-new-project` | Scaffolds a new empty Unity project, patches `Packages/manifest.json` with URP/HDRP/2D + Input System + Test Framework, writes a Unity `.gitignore`. |
 | Skill | `/coding-principles` | Reference card of C# / Unity / general engineering principles. Auto-loaded into the `coder` agent; also invokable directly as a style-guide lookup. |
 | Agent | `coder` | Executes a coding plan from a planner. Strictly follows the principles, refuses to expand scope or add abstractions the plan didn't ask for. Unity-aware: writes C# and Editor builder scripts for scene/UI changes; refuses to hand-edit `.unity` / `.prefab` YAML hierarchies. |
+| Agent | `researcher` | Performs disciplined web research with source-cited reporting. Prefers primary sources, tags every claim with `[Source]` / `[Inference]` / `[Conflict]` / `[Gap]`, and refuses to assert facts it cannot cite. |
 
 ## Install
 
