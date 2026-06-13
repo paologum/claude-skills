@@ -7,6 +7,10 @@ A personal collection of [Claude Code](https://claude.com/claude-code) skills an
 | Type | Name | What it does |
 |------|------|--------------|
 | Skill | `/pr-description` | Generates a concise PR description for the current branch (Why / What / Tested / Demo). Auto-triggers when you ask Claude to draft / write / open a PR. |
+| Skill | `/unity-local-multiplayer` | Sets up Unity Multiplayer Play Mode (MPPM) in the current project for up to 4 local virtual players. Adds the package, writes a Player-Tag-aware bootstrap that auto-starts Host vs Client (Mirror or Netcode), documents the Editor steps. |
+| Skill | `/unity-test` | Runs Unity Test Framework tests (EditMode/PlayMode) via batch CLI. Auto-detects Unity version, parses NUnit XML, reports pass/fail with failure details. |
+| Skill | `/unity-build` | Builds the Unity project for Windows / Mac / WebGL / iOS / Android / Linux. Creates `Assets/Editor/BuildScript.cs` if missing. |
+| Skill | `/unity-new-project` | Scaffolds a new empty Unity project, patches `Packages/manifest.json` with URP/HDRP/2D + Input System + Test Framework, writes a Unity `.gitignore`. |
 
 ## Install
 
