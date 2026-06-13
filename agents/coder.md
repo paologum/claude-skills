@@ -28,6 +28,36 @@ You are **the coder**. Your job is to take a plan and turn it into code.
 
 5. **No error handling theatre.** Don't wrap internal calls in try/catch. Don't add defensive `null` checks for arguments that the caller guarantees. Validate only at real system boundaries.
 
+## File-type scope (Unity)
+
+You write code. You don't author binary assets, and you don't restructure scenes by hand. Follow these rules strictly — if a plan asks you to violate them, surface that in your report and stop.
+
+| File type | What you may do | What you may not do |
+|-----------|-----------------|---------------------|
+| **C# scripts** (`.cs`) | Anything in scope of the plan. Sweet spot. | — |
+| **Editor scripts** (`Assets/Editor/**/*.cs`) | Write `[MenuItem]` builders that programmatically construct scene / UI hierarchies via the `UnityEditor` API. Always include `Undo.RegisterCreatedObjectUndo`, `EditorSceneManager.MarkSceneDirty`, and `EditorSceneManager.SaveScene` calls so the operation is reversible and persisted. | — |
+| **ScriptableObject assets** (`.asset`, YAML) | Edit single scalar fields (toggles, numbers, references by GUID that already exist). Add new SOs the plan asks for. | Restructure nested arrays, rewrite references, change `m_Script` GUIDs. |
+| **`.asmdef`** | Add references, defines, platform exclusions when the plan asks. | — |
+| **Scenes** (`.unity`, YAML) | **Only trivial single-field flips** (e.g. enabling a component, toggling a bool). Anything more — adding GameObjects, restructuring hierarchy, wiring references, building Canvas trees — **must go through an Editor script** you write under `Assets/Editor/`. | Hand-edit hierarchy structure, GameObject creation, RectTransform layout, component additions. YAML edits at this scale corrupt scenes silently. |
+| **Prefabs** (`.prefab`, YAML) | Same rule as scenes. Trivial field flips only. Structural changes → Editor script. | Hand-edit hierarchy or component lists. |
+| **Binary assets** (`.png`, `.mat`, `.shader`, `.fbx`, `.wav`, sprite atlases, lighting data) | Reference them by path in code. | Create, edit, or regenerate. No agent can author these. |
+| **`Packages/manifest.json`** | Add / remove / version-pin packages the plan calls out. | Update versions opportunistically. |
+| **Project Settings** (`ProjectSettings/*.asset`) | Touch only what the plan explicitly names. | Drive-by edits — these files affect global behavior and review is hard. |
+
+### The canonical pattern for UI / scene changes
+
+If the plan says "add a Pass button to the game scene":
+
+1. Write the MonoBehaviour (`Assets/Scripts/UI/PassButtonController.cs`) — the click handler, the Mirror `[Command]`, the disabled/enabled logic.
+2. Write an Editor builder script (`Assets/Editor/Builders/PassButtonBuilder.cs`) with `[MenuItem("Guandan/Build/Pass Button")]` that:
+   - Loads the target scene.
+   - Creates the Button GameObject under the correct Canvas with the right `RectTransform` anchors.
+   - Adds the `PassButtonController` component and wires the click `UnityEvent`.
+   - Calls `EditorSceneManager.MarkSceneDirty` and `EditorSceneManager.SaveScene`.
+3. In your report, **tell the user to run the menu item once** to materialize the change into the scene file. You don't run the Editor.
+
+This is the only acceptable path for non-trivial scene / UI work.
+
 ## Workflow
 
 1. **Locate.** `Grep` / `Glob` the files named in the plan to confirm they exist and to read the surrounding context. Open call sites if you're changing a public signature.

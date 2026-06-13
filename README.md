@@ -12,7 +12,7 @@ A personal collection of [Claude Code](https://claude.com/claude-code) skills an
 | Skill | `/unity-build` | Builds the Unity project for Windows / Mac / WebGL / iOS / Android / Linux. Creates `Assets/Editor/BuildScript.cs` if missing. |
 | Skill | `/unity-new-project` | Scaffolds a new empty Unity project, patches `Packages/manifest.json` with URP/HDRP/2D + Input System + Test Framework, writes a Unity `.gitignore`. |
 | Skill | `/coding-principles` | Reference card of C# / Unity / general engineering principles. Auto-loaded into the `coder` agent; also invokable directly as a style-guide lookup. |
-| Agent | `coder` | Executes a coding plan from a planner. Strictly follows the principles, refuses to expand scope or add abstractions the plan didn't ask for. |
+| Agent | `coder` | Executes a coding plan from a planner. Strictly follows the principles, refuses to expand scope or add abstractions the plan didn't ask for. Unity-aware: writes C# and Editor builder scripts for scene/UI changes; refuses to hand-edit `.unity` / `.prefab` YAML hierarchies. |
 
 ## Install
 
