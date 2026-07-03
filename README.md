@@ -14,6 +14,7 @@ A personal collection of [Claude Code](https://claude.com/claude-code) skills an
 | Skill | `/coding-principles` | Reference card of C# / Unity / general engineering principles. Auto-loaded into the `coder` agent; also invokable directly as a style-guide lookup. |
 | Agent | `coder` | Executes a coding plan from a planner. Strictly follows the principles, refuses to expand scope or add abstractions the plan didn't ask for. Unity-aware: writes C# and Editor builder scripts for scene/UI changes; refuses to hand-edit `.unity` / `.prefab` YAML hierarchies. |
 | Agent | `researcher` | Performs disciplined web research with source-cited reporting. Prefers primary sources, tags every claim with `[Source]` / `[Inference]` / `[Conflict]` / `[Gap]`, and refuses to assert facts it cannot cite. |
+| MCP | `unity` | Coplay's Unity MCP server. When your Unity Editor is open, Claude gets 47 tools to drive the Editor directly: `manage_gameobject`, `run_tests`, `manage_build`, `manage_packages`, `read_console`, `execute_menu_item`, `manage_editor` (Play mode), and more. See "Unity MCP" section below for prereqs. |
 
 ## Install
 
@@ -33,6 +34,47 @@ To update later:
 /plugin marketplace update claude-skills
 /reload-plugins
 ```
+
+## Unity MCP (optional but powerful)
+
+The plugin ships a `.mcp.json` that wires up **CoplayDev's Unity MCP server**. When the Unity Editor is open with the companion package installed, Claude gets 47 tools to drive the Editor live — create GameObjects in the scene, run tests against the warm Editor (~2s instead of 30s cold batchmode), read the Editor console, manage packages, execute menu items, enter/exit Play mode, and more.
+
+### Prereqs (one-time per machine)
+
+```bash
+# Python + uv (the MCP server runs via uvx)
+brew install uv       # or: pipx install uv
+```
+
+Then in each Unity project you want to use it with, add the companion package:
+
+```
+# In Unity: Window → Package Manager → + → Add package from git URL
+https://github.com/CoplayDev/unity-mcp.git?path=/MCPForUnity
+```
+
+Or via OpenUPM:
+
+```bash
+openupm add com.coplaydev.unity-mcp
+```
+
+### Using it
+
+Once the plugin is enabled and the Unity Editor is open with the companion package, Claude has the `unity:*` tools available automatically. Ask things like:
+
+- *"Add a Pass button under LobbyCanvas at anchor (1, 0)"* — hits `manage_gameobject`
+- *"Run the SetValidator tests"* — hits `run_tests`
+- *"What's in the Editor console?"* — hits `read_console`
+- *"Install Multiplayer Play Mode"* — hits `manage_packages`
+- *"Enter Play mode, wait 3 seconds, read the console"* — hits `manage_editor` + `read_console`
+
+If the Editor isn't open, MCP calls just fail — the plain skills (`/unity-test`, `/unity-build`) still work via CLI batchmode as a fallback.
+
+### Unity version support
+
+- Unity 2021.3 LTS through 6.x (the Guandan project's 6000.3.11f1 is covered).
+- Requires Python 3.10 or later on the client machine.
 
 ## How to use
 
