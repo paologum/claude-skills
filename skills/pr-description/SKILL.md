@@ -37,6 +37,16 @@ argument-hint: "[base-branch]"
 !`git diff "$(git merge-base HEAD @{u} 2>/dev/null || git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD origin/master 2>/dev/null)"..HEAD 2>/dev/null | head -800`
 ```
 
+**Lockfiles / build manifests present (for ecosystem-aware test commands):**
+```
+!`ls -1 pnpm-lock.yaml package-lock.json yarn.lock bun.lockb requirements.txt pyproject.toml Cargo.toml go.mod Gemfile.lock composer.lock pubspec.yaml mix.exs build.gradle pom.xml 2>/dev/null | head -10`
+```
+
+**CODEOWNERS (for reviewer suggestion):**
+```
+!`cat .github/CODEOWNERS CODEOWNERS docs/CODEOWNERS 2>/dev/null | head -50`
+```
+
 ## Your task
 
 Generate a PR description for the changes above. Output a single fenced markdown block the user can copy directly into GitHub. Do not include extra commentary outside the block.
@@ -89,9 +99,32 @@ https://github.com/user-attachments/assets/REPLACE-ME
 ### Rules
 
 1. **Concise & high-level.** No file-by-file walkthroughs. The diff already shows that. Aim for behavior and intent.
-2. **Tested bullets are imperative reviewer steps.** "Run `pnpm test settings`", "Open /dashboard and toggle dark mode" — not "I tested X".
-3. **Auto-detect UI changes.** Look at the file list above. If no UI files were touched, **omit the entire Demo section.**
-4. **Link issues.** Scan the branch name and commit messages for issue references (`#123`, `ABC-456`, `fix-123`). Add a `Fixes #N` line under **Why?** if found.
-5. **Breaking changes.** If you spot removed exports, renamed public APIs, or schema changes that aren't backward-compatible, add a `### Breaking change` subsection under **What?** with a one-line migration note.
-6. **Don't invent test steps.** If you can't tell from the diff what to test, leave the bullets as `- [describe step here]` placeholders for the author to fill in — better than fabricating.
-7. **No emoji, no checkboxes, no "Type of change" tables.** Keep it lean.
+2. **Tested bullets are imperative reviewer steps and ecosystem-aware.** Look at the lockfiles block above and pick a real command — `pnpm test`, `npm test`, `pytest`, `cargo test`, `go test ./...`, `dotnet test`, etc. Add a path / filter when you can ("Run `pnpm test settings`", "Open `/dashboard` and toggle dark mode"). Never "I tested X."
+3. **Auto-detect UI changes.** If no files matching `*.tsx`, `*.jsx`, `*.vue`, `*.svelte`, `*.css`, `*.scss`, `*.html`, `views/**`, `templates/**`, `*.uxml`, `*.uss`, `*.unity` (UI prefabs), or `Assets/**/*.prefab` were touched, **omit the Demo section entirely.**
+4. **Link issues.** Scan the branch name and commit messages for `#123`, `ABC-456`, `fix-123`. Add a `Fixes #N` line under **Why?** if found.
+5. **Breaking-change detection is explicit.** Scan the diff for: removed public exports, renamed public APIs, changed method signatures on public types, removed CLI flags, changed config keys, removed/renamed DB columns or migration files, removed REST endpoints, or `package.json`/`Cargo.toml`/etc. major-version bumps to dependencies. **Always emit one of:**
+   - A `### Breaking changes` subsection under **What?** with a one-line migration note per change, OR
+   - A single line at the bottom of **What?**: `No breaking changes.`
+6. **Risk callouts from sensitive paths.** If the changed files include any of these, add a short `### Heads up` block to **What?** listing what's touched:
+   - `**/auth/**`, `**/security/**`, `**/secrets/**`
+   - `**/migrations/**`, `*.sql`, schema files
+   - `.github/workflows/**`, `Dockerfile*`, deploy scripts, `infra/**`, `terraform/**`
+   - `**/package*.json`, `**/manifest.json`, lockfiles (dep changes)
+   - `**/CODEOWNERS`, `**/.gitignore`, `**/CLAUDE.md`
+   Keep each callout to one line. Skip the block entirely if none apply.
+7. **Suggested reviewers from CODEOWNERS.** If a CODEOWNERS file is present, intersect its globs with the changed files and append a `### Suggested reviewers` line at the very bottom of the body (after Demo): `@owner1 @owner2` (deduped, max 4). Skip if no file or no matches.
+8. **Don't invent test steps.** If you can't tell from the diff what to test, leave the bullets as `- [describe step here]` placeholders. Better than fabricating.
+9. **No emoji, no checkboxes, no "Type of change" tables.** Keep it lean.
+
+### Self-review gate
+
+Before emitting, verify silently:
+
+- Title matches `<type>(<scope>)?: <imperative phrase>`, ≤ 72 chars, no trailing period.
+- **Demo** section is present iff UI files were touched.
+- Either a `### Breaking changes` block exists, OR the line `No breaking changes.` is present.
+- Tested bullets contain a real command from the detected ecosystem, not "I tested" / "verified manually" / vague prose.
+- No file-by-file narration in **What?**.
+- Body is ≤ ~250 words (excluding the CODEOWNERS reviewer line).
+
+If any check fails, fix and re-emit. Never ship a description that fails the gate.
