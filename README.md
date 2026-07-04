@@ -16,6 +16,7 @@ A personal collection of [Claude Code](https://claude.com/claude-code) skills an
 | Agent | `coder` | Executes a coding plan from a planner. Strictly follows the principles, refuses to expand scope or add abstractions the plan didn't ask for. Unity-aware: writes C# and Editor builder scripts for scene/UI changes; refuses to hand-edit `.unity` / `.prefab` YAML hierarchies. |
 | Agent | `researcher` | Performs disciplined web research with source-cited reporting. Prefers primary sources, tags every claim with `[Source]` / `[Inference]` / `[Conflict]` / `[Gap]`, and refuses to assert facts it cannot cite. |
 | Skill | `/unity-mcp-setup` | Diagnoses the Coplay Unity MCP setup (uv, Python via pyenv, Coplay package, Editor bridge on :8080, Claude Code registration) and walks the user through fixing anything missing. See "Unity MCP" section below. |
+| Hook | `enforce-safety` | `PreToolUse` hook that hard-blocks irreversible/destructive Bash commands (`rm -rf`, force-push, `git reset --hard`, `git clean -f`, `sudo`, `chmod -R 777`, `dd`) whenever the plugin is enabled. Complements the `deny`/`ask` rules applied by `/harden-permissions`. Fails open if it can't parse input. |
 
 ## Install
 
