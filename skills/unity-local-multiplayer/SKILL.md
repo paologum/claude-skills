@@ -102,6 +102,34 @@ Adjustments to make:
 
 Wrap the MPPM-specific code in `#if UNITY_MP_TOOLS_DEV` so the file compiles in builds where the package isn't included.
 
+**Handle the host/client startup race.** MPPM launches all virtual players at roughly the same instant, so a client's `StartClient()` often fires *before* the host's `StartHost()` is listening — the client then fails to connect and just sits at the menu. The tag doesn't control ordering; both run their `AutoConnect` in parallel. Two fixes, apply both:
+
+1. **Host starts immediately; clients retry.** Don't assume the host is up. Have clients attempt connection on a short repeating retry until connected (or a timeout), instead of a single `StartClient()`:
+
+```csharp
+else
+{
+    nm.networkAddress = "127.0.0.1";
+    // Client: retry until the host is listening (MPPM starts players in parallel).
+    static System.Collections.IEnumerator ConnectWithRetry(NetworkManager m)
+    {
+        for (int i = 0; i < 20 && !NetworkClient.isConnected; i++)
+        {
+            if (!NetworkClient.active) m.StartClient();
+            yield return new UnityEngine.WaitForSeconds(0.5f);
+        }
+        if (!NetworkClient.isConnected) Debug.LogError("[MPPM] Client gave up connecting to host.");
+    }
+    // Needs a MonoBehaviour to run the coroutine — see note below.
+}
+```
+
+Since `MPPMBootstrap` is `static`, spawn a tiny hidden `MonoBehaviour` (`new GameObject("MPPMRunner")` + `DontDestroyOnLoad`) to run the retry coroutine, or convert the bootstrap to a `MonoBehaviour` created at `AfterSceneLoad`. For **NGO**, poll `NetworkManager.Singleton.IsConnectedClient` instead of `NetworkClient.isConnected`.
+
+2. **If "lobby" means a game-level lobby scene, not just a network connection**, connecting is only half of it — after the transport connects, the client must still be *routed into the lobby UI/state*. Auto-connect gets them on the wire; joining the lobby list is your lobby system's join RPC/message. Note this to the user explicitly so they don't expect network auto-connect alone to populate the lobby.
+
+**On "why is host second?"**: sidebar/order in the MPPM window is just Player Tag order and does **not** guarantee host-starts-first at runtime — the retry above is what actually guarantees clients wait for the host. Don't rely on player ordering for correctness.
+
 ### Step 4 — tell the user what to do in the Editor
 
 After Unity reimports, output a clear checklist for the user (Claude can't click Editor menus):
@@ -118,7 +146,7 @@ After Unity reimports, output a clear checklist for the user (Claude can't click
 Add `docs/local-multiplayer.md` (create the `docs/` directory if missing) with:
 - 3-sentence overview of MPPM
 - The 4-step checklist from Step 4
-- A "Troubleshooting" subsection with: "If clients don't connect, confirm the transport port matches the host's, check the firewall, and verify the bootstrap script is in `Assets/Scripts/DevTools/`."
+- A "Troubleshooting" subsection with: "If clients don't connect or don't auto-join the lobby: (1) the host/client startup race is the usual cause — clients start in parallel with the host and must retry until it's listening (the bootstrap does this); (2) confirm the transport port matches the host's and the address is `127.0.0.1`; (3) check the firewall; (4) verify the bootstrap script is in `Assets/Scripts/DevTools/` and the active scene matches the gated scene names; (5) remember network-connect ≠ lobby-join — the client still needs your lobby system's join call after connecting."
 
 Keep the docs page under ~60 lines.
 
