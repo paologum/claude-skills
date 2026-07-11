@@ -21,14 +21,14 @@ allowed-tools: "Bash(ls *) Bash(rm *) Bash(pkill *) Bash(pgrep *) Bash(du *) Bas
 !`grep -E "com\.unity\.multiplayer\.playmode" Packages/manifest.json 2>/dev/null || echo "MPPM not in manifest — run /unity-local-multiplayer to install"`
 ```
 
-**Existing clone directories:**
+**Existing clone directories** (MPPM's on-disk layout has changed across versions — check all known patterns, and any dir whose name mentions a virtual player):
 ```
-!`ls -1d Library/VP-* Library/VirtualProjects 2>/dev/null | head -20`
+!`find Library -maxdepth 2 -type d \( -name "VirtualProjects" -o -name "VP-*" -o -name "*mppm*" -o -name "*virtualplayer*" \) 2>/dev/null | head -20`
 ```
 
-**Clone size:**
+**Clone size (across all discovered dirs):**
 ```
-!`du -sh Library/VirtualProjects 2>/dev/null || echo "(no VirtualProjects dir)"`
+!`find Library -maxdepth 2 -type d \( -name "VirtualProjects" -o -name "VP-*" \) 2>/dev/null | xargs -r du -sh 2>/dev/null | head -10`
 ```
 
 **Running Unity processes:**
@@ -55,16 +55,18 @@ Bring MPPM virtual players back to a clean, in-sync state after Assets changes b
    ```
    Wait ~2s. If any are still alive: `pkill -9 -f "Unity.*virtualprojects"`.
 
-3. **For case (a) or (c) — stale caches**: delete the per-clone `Library/` inside each virtual project:
+3. **For case (a) or (c) — stale caches**: for each clone directory discovered in the context section above, delete only the per-clone `Library/` and `Temp/` inside it (not the clone dir itself, so the Player Tag config survives):
    ```bash
-   rm -rf Library/VirtualProjects/*/Library
-   rm -rf Library/VirtualProjects/*/Temp
+   # Example — replace <clone-root> with each dir listed above
+   rm -rf <clone-root>/Library
+   rm -rf <clone-root>/Temp
    ```
-   Do NOT delete `Library/VirtualProjects` itself — that also deletes MPPM's Player Tag config for each clone, and the user has to reconfigure the roster in the Editor.
+   Do NOT delete the top-level clone container (`Library/VirtualProjects` on newer MPPM, or the individual `Library/VP-<hash>` dirs on older builds) — that also wipes the Player Tag config and forces the user to reconfigure the roster.
 
-4. **For case (d) — full reset**: delete the whole VirtualProjects directory. The user WILL have to re-add each virtual player in the Multiplayer window afterwards.
+4. **For case (d) — full reset**: delete every clone directory discovered above. The user WILL have to re-add each virtual player in the Multiplayer window afterwards.
    ```bash
-   rm -rf Library/VirtualProjects
+   # Example — one per discovered dir
+   rm -rf <clone-root>
    ```
 
 5. **Instruct the user how to bring clones back up** (one-time, in the main Editor):
