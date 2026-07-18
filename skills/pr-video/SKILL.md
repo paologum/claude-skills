@@ -32,9 +32,9 @@ argument-hint: "[duration-seconds] [PR-number]"
 !`printf "gh attach: "; gh attach --version 2>/dev/null || echo "MISSING — install: gh extension install Addono/gh-attach"; printf "gifski: "; which gifski || echo "MISSING — install: brew install gifski (only needed for GIF fallback)"; printf "ffprobe: "; which ffprobe || echo "MISSING — install: brew install ffmpeg (used to verify duration)"`
 ```
 
-**`gh attach` session valid?** (browser-session cookie must be logged in)
+**`gh attach` session valid?** (uses `gh auth token` — you're set if `gh` itself works)
 ```
-!`gh attach whoami 2>/dev/null || echo "NOT LOGGED IN — one-time setup: gh attach login (opens browser, saves cookie to keychain)"`
+!`gh attach login --status 2>/dev/null || echo "NOT AUTHENTICATED — run: gh attach login (no browser — just refreshes from 'gh auth token')"`
 ```
 
 **Existing pr-videos directory (used only by the GIF fallback):**
@@ -58,7 +58,7 @@ The pipeline has three tracks. Do them in order — each track's failure is what
 
 ### A1. Precheck
 
-- `gh attach whoami` must succeed. If not: refuse and print `gh attach login` for the user to run once. Do NOT try to log in for them — the flow is browser-based and interactive.
+- `gh attach login --status` must exit 0 (authenticated). If it exits 2, run `gh attach login` — it's a non-interactive wrapper around `gh auth token`, safe to run unattended. If `gh auth token` itself fails, the user needs to run `gh auth login` first (that one IS interactive).
 - `owner/repo` must be resolvable (from `gh repo view` above).
 - A PR must exist on this branch. If not, do steps A2–A7 anyway, save the MP4 to `Temp/pr-video.mp4`, and print the exact `![](URL)` snippet the user can paste when they open the PR.
 
