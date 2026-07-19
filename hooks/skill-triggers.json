@@ -1,0 +1,89 @@
+{
+  "_comment": "Data-driven trigger map for hooks/suggest-skill.sh. Each rule fires a system-reminder nudging the model toward a plugin skill instead of inline reimplementation. Edit this file to add / tune rules — the shell script is intentionally dumb about the mappings.",
+
+  "bash_command": [
+    {
+      "pattern": "gh[[:space:]]+pr[[:space:]]+create",
+      "skill": "pr-description",
+      "why": "drafts the PR body (Why / What / Tested / Demo) with a Conventional Commits title and auto-linked issues"
+    },
+    {
+      "pattern": "git[[:space:]]+worktree[[:space:]]+add",
+      "skill": "start-task",
+      "why": "creates the worktree with the project's issue-first branch naming and prefetches issue context via gh"
+    },
+    {
+      "pattern": "UnityEngine\\.ScreenCapture\\.CaptureScreenshot|screencapture[[:space:]]",
+      "skill": "pr-screenshot",
+      "why": "captures the Play-mode screenshot AND embeds it in the PR Demo section — you still get to pick the moment / scene"
+    },
+    {
+      "pattern": "Unity(Recorder|Recording)|-recorderTakeFPS|Movie[Rr]ecorder|screencapture[[:space:]]+-[a-z]*v",
+      "skill": "pr-video",
+      "why": "records with Unity Recorder + uploads via gh attach, with automatic GIF fallback and end-to-end verification the PR renders a real <video> element"
+    },
+    {
+      "pattern": "Unity\\.app/Contents/MacOS/Unity[[:space:]]+-projectPath",
+      "skill": "unity-switch-worktree",
+      "why": "closes the current Editor, opens on the target path, waits for MCP correctly (avoids the 30-min curl-hang footgun), and rebinds the session"
+    },
+    {
+      "pattern": "Unity\\.app/Contents/MacOS/Unity[[:space:]]+-batchmode.*-buildTarget",
+      "skill": "unity-build",
+      "why": "batchmode Standalone build with the project's BuildScript, per-target output paths, and log-error surfacing"
+    },
+    {
+      "pattern": "Unity\\.app/Contents/MacOS/Unity[[:space:]]+-batchmode.*-runTests.*-testPlatform[[:space:]]+playmode",
+      "skill": "run-playmode",
+      "why": "runs the specified PlayMode test class via the warm Editor when available (~2s startup) instead of batchmode's cold ~30s"
+    },
+    {
+      "pattern": "lsof[[:space:]]+.*:8080|claude[[:space:]]+mcp[[:space:]]+list.*(unity|coplay)",
+      "skill": "unity-mcp-setup",
+      "why": "already covers every diagnostic path for Coplay's Unity MCP (uv, pyenv shims, port 8080, stale stdio registration)"
+    },
+    {
+      "pattern": "pkill[[:space:]]+.*[Uu]nity|killall[[:space:]]+[Uu]nity",
+      "skill": "unity-switch-worktree",
+      "why": "the switch skill kills the specific Editor process (not Unity Hub / license client / MPPM clones), then reopens on the target",
+      "severity": "warn"
+    }
+  ],
+
+  "user_prompt": [
+    {
+      "pattern": "(?i)(write|draft|create|open).{0,20}(pull request|\\bpr\\b)",
+      "skill": "pr-description",
+      "why": "drafts the PR body — trigger this before hand-writing a description"
+    },
+    {
+      "pattern": "(?i)(take|grab|add|attach|include).{0,30}(screenshot|demo image|demo shot)",
+      "skill": "pr-screenshot",
+      "why": "the Play-mode screenshot + PR-body embed is one skill call away"
+    },
+    {
+      "pattern": "(?i)(record|capture|make).{0,30}(video|gif|screencast|clip)",
+      "skill": "pr-video",
+      "why": "Unity Recorder + gh attach path, with the correct GIF fallback and rendered-<video>-tag verification"
+    },
+    {
+      "pattern": "(?i)(start|begin|kick off|spin up).{0,30}(task|issue|work|worktree)",
+      "skill": "start-task",
+      "why": "creates the isolated worktree off the default branch with the project's naming convention"
+    },
+    {
+      "pattern": "(?i)(switch|point|open).{0,20}(unity|editor).{0,30}(worktree|branch|project)",
+      "skill": "unity-switch-worktree",
+      "why": "close-current + open-new + wait-for-MCP + rebind, in one call"
+    },
+    {
+      "pattern": "(?i)(build|compile).{0,20}(mac|windows|linux|webgl|ios|android|standalone|player|app)",
+      "skill": "unity-build",
+      "why": "the batchmode Standalone build path with per-target BuildScript methods"
+    },
+    {
+      "pattern": "(?i)set up (steam|mcp|multiplayer|mppm|unity mcp|smart merge)",
+      "skill": "unity-mcp-setup"
+    }
+  ]
+}
