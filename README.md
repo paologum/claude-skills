@@ -25,6 +25,7 @@ A personal collection of [Claude Code](https://claude.com/claude-code) skills an
 | Skill | `/netcode-check` | Read-only audit of Netcode-for-GameObjects or Mirror wiring — unregistered spawn prefabs, empty / duplicate `GlobalObjectIdHash`, orphan NetworkObjects, multi-NetworkManager scenes. Reports findings, does not mutate. |
 | Skill | `/run-playmode` | Runs Unity PlayMode tests filtered by class / namespace / method, via the warm MCP Editor (~2s) when available, else falls back to `/unity-test`. Parses failures into copy-paste-friendly form. |
 | Skill | `/scene-wire` | Drives Unity MCP (`manage_gameobject`, `manage_ui`, `manage_components`) from a natural-language wiring description — reads current scene, plans the smallest call sequence, applies, saves. Refuses to hand-edit scene / prefab YAML. |
+| Skill | `/mermaid-check` | Audits Mermaid diagrams in a PR body / file / snippet for the silent-render-fail bugs GitHub swallows without an error (literal `;` in labels, unescaped `\|` in flowchart edges, `<br>` vs `<br/>`, HTML stripped by strict security level, unbalanced `activate`/`deactivate`, node IDs with reserved chars). Preserves diagram semantics — only rewrites what would block the render. |
 | Hook | `enforce-safety` | `PreToolUse` hook that hard-blocks irreversible/destructive Bash commands (`rm -rf`, force-push, `git reset --hard`, `git clean -f`, `sudo`, `chmod -R 777`, `dd`) whenever the plugin is enabled. Complements the `deny`/`ask` rules applied by `/harden-permissions`. Fails open if it can't parse input. |
 
 ## Install
