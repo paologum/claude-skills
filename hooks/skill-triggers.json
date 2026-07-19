@@ -18,6 +18,16 @@
       "why": "captures the Play-mode screenshot AND embeds it in the PR Demo section — you still get to pick the moment / scene"
     },
     {
+      "pattern": "gh[[:space:]]+attach[[:space:]]+upload|user-attachments/assets",
+      "skill": "unity-e2e-verify",
+      "why": "the full workflow of driving Play mode via UI dispatch, capturing at each state, and posting a structured verification comment with CDN-hosted inline images (private-repo safe) — one skill call instead of 20"
+    },
+    {
+      "pattern": "onClick\\.Invoke\\(\\)|FindFirstObjectByType.*(MainMenu|LobbyUI|LobbyManager|HandManager)",
+      "skill": "unity-e2e-verify",
+      "why": "you're driving the UI via event dispatch — this skill wraps the full drive + capture + Console-grep + PR-comment loop with the private-repo-safe upload path baked in"
+    },
+    {
       "pattern": "Unity(Recorder|Recording)|-recorderTakeFPS|Movie[Rr]ecorder|screencapture[[:space:]]+-[a-z]*v",
       "skill": "pr-video",
       "why": "records with Unity Recorder + uploads via gh attach, with automatic GIF fallback and end-to-end verification the PR renders a real <video> element"
@@ -60,6 +70,16 @@
       "pattern": "(?i)(take|grab|add|attach|include).{0,30}(screenshot|demo image|demo shot)",
       "skill": "pr-screenshot",
       "why": "the Play-mode screenshot + PR-body embed is one skill call away"
+    },
+    {
+      "pattern": "(?i)(verify|prove|demonstrate|walk through|show).{0,30}(end.?to.?end|e2e|feature|change|fix|works|in.?editor)|show.{0,20}the.{0,10}(feature|change|fix)|(prove|show).*(the fix|it works|the change)",
+      "skill": "unity-e2e-verify",
+      "why": "drives Play mode via UI dispatch, screenshots each state, greps Console for the diagnostic line, posts a structured PR comment with CDN-hosted images that render inline on private repos"
+    },
+    {
+      "pattern": "(?i)(add|attach|generate|post).{0,30}(pr evidence|verification comment|proof|audit trail)",
+      "skill": "unity-e2e-verify",
+      "why": "structured PR verification comment (flow narrative + inline screenshots + log evidence + audit table) is exactly what this skill produces"
     },
     {
       "pattern": "(?i)(record|capture|make).{0,30}(video|gif|screencast|clip)",
