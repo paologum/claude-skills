@@ -47,11 +47,17 @@ Capture a screenshot showing the change on this branch and attach it to the PR's
    Then wait one frame (call `mcp__UnityMCP__manage_editor` `action: "get_state"`) so the file flushes.
 4. **Exit Play mode** (`action: "stop"`).
 5. **Rename** the file to something meaningful for the diff: `docs/pr-screenshots/pr-<N>-<short-slug>.png` where `<N>` is the PR number and `<short-slug>` describes the change (e.g. `pr-42-pass-button.png`).
-6. **Attach it to the PR.** If a PR exists, run:
+6. **Commit the screenshot** on the current branch — GitHub only renders images from paths that are actually in the tree at the head SHA:
    ```bash
-   gh pr edit <N> --body "$(gh pr view <N> --json body -q .body | sed 's|_drag screenshot here_|![screenshot](../blob/<branch>/docs/pr-screenshots/<file>?raw=true)|')"
+   git add docs/pr-screenshots/<file>
+   git commit -m "docs: PR screenshot for #<N>"
+   git push
    ```
-   If no PR exists yet, just print the relative path and tell the user to include it when they open the PR.
+7. **Embed it in the PR body.** Do NOT try to inline-`sed` into `gh pr edit --body` — PR bodies routinely contain quotes, backticks, `$`, and newlines that shell-escape wrong. Instead:
+   1. `gh pr view <N> --json body -q .body > /tmp/pr-body.md`
+   2. Open `/tmp/pr-body.md` with the `Edit` tool and replace `_drag screenshot here_` with `![screenshot](docs/pr-screenshots/<file>)`. Relative paths inside PR body markdown resolve against the head SHA of the PR — this is the *only* embed form that reliably renders across public and private repos.
+   3. `gh pr edit <N> --body-file /tmp/pr-body.md`
+8. If **no PR exists** yet, skip steps 6–7 and just print the committed path so the user can include the same `![screenshot](docs/pr-screenshots/<file>)` snippet when they open the PR.
 
 ### Steps (batchmode fallback — no MCP)
 
