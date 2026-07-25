@@ -1,6 +1,6 @@
 ---
 name: pr-screenshot
-description: Captures a Unity Play-mode screenshot via MCP, uploads it to GitHub's user-attachments CDN via `gh attach`, and embeds the resulting URL in the current PR's Demo section. Never commits image files to the repo. Falls back to a local temp path + drag-drop instructions when `gh attach` is unavailable. Use when the user asks to grab a PR screenshot, add a demo image to the PR, take a Unity screenshot for review, capture the current scene for the PR, or "show the change in the PR".
+description: Captures a Unity Play-mode screenshot via MCP, uploads it to GitHub via `gh attach`, and embeds the resulting URL in the current PR's Demo section. Never commits image files to the repo. Tries `--strategy browser-session` first (user-attachments CDN, renders inline everywhere); falls back to `--strategy release-asset` (uploads to a hidden `_gh-attach-assets` release — private-repo-friendly, renders inline as `<img>`) when browser-session returns 422 or the session cookie is missing. Final fallback is a local temp path + drag-drop instructions when `gh attach` is unavailable entirely. Use when the user asks to grab a PR screenshot, add a demo image to the PR, take a Unity screenshot for review, capture the current scene for the PR, or "show the change in the PR".
 allowed-tools: "Bash(git *) Bash(gh *) Bash(gh attach *) Bash(mkdir *) Bash(ls *) Bash(rm *) Bash(stat *) Bash(curl *) Bash(which *) Read Write Edit"
 argument-hint: "[PR-number]"
 ---
@@ -32,9 +32,9 @@ argument-hint: "[PR-number]"
 !`gh attach --version 2>/dev/null || echo "MISSING — install: gh extension install Addono/gh-attach"`
 ```
 
-**`gh attach` session valid?** (browser-session cookie must be logged in)
+**`gh attach` session valid?** (browser-session cookie must be logged in — release-asset works without it)
 ```
-!`gh attach whoami 2>/dev/null || echo "NOT LOGGED IN — one-time setup: gh attach login (opens browser, saves cookie to keychain)"`
+!`gh attach login --status 2>/dev/null || echo "NOT LOGGED IN — browser-session upload will fall through to release-asset. To enable browser-session: gh attach login (opens browser, saves cookie to keychain)"`
 ```
 
 **Is Unity MCP available?** Check whether `mcp__UnityMCP__manage_editor` shows up in your tool list this session. Do NOT trust a `.mcp.json` file's presence — verify by calling `mcp__UnityMCP__manage_editor` with `action: "get_state"` (or `find_gameobjects` on `**`). If the tool is genuinely absent, skip to the batchmode fallback at the bottom.
@@ -65,14 +65,22 @@ Capture a screenshot showing the change on this branch, upload it to GitHub's us
    stat -f%z "Temp/pr-screenshot-<PR>-<slug>.png"    # must be > 0
    ```
    If missing or zero bytes: report the failure and stop. Do NOT fall back to committing anything.
-6. **Upload via `gh attach`** — requires `gh attach whoami` to succeed:
+6. **Upload via `gh attach`.** Try browser-session first, fall to release-asset on any 4xx (typically `Failed to get upload policy: Unprocessable Entity` — the endpoint refuses this token for this repo, common on private repos):
    ```bash
-   gh attach upload "Temp/pr-screenshot-<PR>-<slug>.png" \
+   # Primary — user-attachments CDN, renders inline everywhere
+   URL=$(gh attach upload "Temp/pr-screenshot-<PR>-<slug>.png" \
      --target "<owner>/<repo>#<PR>" \
-     --strategy browser-session \
-     --format url
+     --strategy browser-session --format url 2>/dev/null)
+
+   # Fallback — hidden release, works without browser-session cookie and on private repos
+   if [ -z "$URL" ] || ! echo "$URL" | grep -q "user-attachments/assets/"; then
+     URL=$(gh attach upload "Temp/pr-screenshot-<PR>-<slug>.png" \
+       --target "<owner>/<repo>#<PR>" \
+       --strategy release-asset --format url)
+   fi
+   echo "$URL"
    ```
-   Capture stdout — it's the bare URL, `https://github.com/user-attachments/assets/<uuid>`. If the exit code is non-zero or the output doesn't match that pattern, skip to the **`gh attach` unavailable** fallback below.
+   The URL is either `https://github.com/user-attachments/assets/<uuid>` (browser-session) or `https://github.com/<owner>/<repo>/releases/download/_gh-attach-assets/<filename>` (release-asset). Both render inline as `<img>` in PR bodies. If BOTH strategies fail, skip to the **`gh attach` unavailable** fallback below.
 7. **Verify the URL is reachable**:
    ```bash
    curl -sI -L -o /dev/null -w "%{http_code}" "<the-url>"    # must be 200
@@ -102,12 +110,12 @@ The plain CLI can't drive the Editor into a specific scene state. Do this only i
 
 ### Fallback — `gh attach` unavailable
 
-Triggered when the precheck shows `gh attach` missing, `gh attach whoami` fails, or the upload itself fails.
+Triggered when the precheck shows `gh attach` missing, or BOTH `browser-session` AND `release-asset` upload strategies fail.
 
 1. **Leave the PNG at the local `Temp/…` path.** Do NOT commit it. Do NOT copy it into `docs/`.
 2. Print exactly:
-   > `gh attach` isn't available (`<reason>`). The screenshot is at `Temp/pr-screenshot-<PR>-<slug>.png`. To finish:
-   > - One-time setup: `gh extension install Addono/gh-attach && gh attach login`, then re-run `/pr-screenshot`, OR
+   > `gh attach` isn't working (`<browser-session error>` / `<release-asset error>`). The screenshot is at `Temp/pr-screenshot-<PR>-<slug>.png`. To finish:
+   > - One-time setup: `gh extension install Addono/gh-attach`, then re-run `/pr-screenshot`, OR
    > - Drag the PNG into the PR body in GitHub's web UI (it auto-uploads to user-attachments) and copy the resulting markdown into the Demo section.
 3. Stop. Do not attempt any commit/push workaround.
 
