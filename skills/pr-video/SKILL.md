@@ -1,6 +1,6 @@
 ---
 name: pr-video
-description: Records a Unity Editor UI/gameplay clip and embeds it as an inline playable video in the current Pull Request. Primary path uses Unity Recorder (H.264 MP4 via UnityMediaEncoder — no ffmpeg) + `gh attach` (Addono/gh-attach, browser-session auth) to upload to the `github.com/user-attachments/assets/*` CDN — the only URL scheme GitHub server-side-renders as a real `<video>` element with play/scrub/fullscreen. Automatic fallback to a GIF (Unity Recorder → gifski) committed under `docs/pr-videos/` when the MP4 exceeds 10 MB, the upload fails, or `gh attach login` hasn't been run. Verifies every step end-to-end — file exists and has non-zero duration, upload URL returns HTTP 200, PR body's rendered HTML actually contains a `<video>` tag pointing at the uploaded asset. Never leaves a broken PR. Use when the user asks to record a PR video, capture a Unity video for the PR, add a video demo to the PR, screencast the change for review, "show the reviewer the animation", or "attach a video to this PR".
+description: Records a Unity Editor UI/gameplay clip and embeds it as an inline playable video in the current Pull Request. Primary path uses Unity Recorder (H.264 MP4 via UnityMediaEncoder — no ffmpeg) + `gh attach` (Addono/gh-attach, browser-session auth) to upload to the `github.com/user-attachments/assets/*` CDN — the only URL scheme GitHub server-side-renders as a real `<video>` element with play/scrub/fullscreen. Automatic fallback to a chat-handoff (SendUserFile → drag-drop in web UI) when the CDN upload is rejected (private-repo 422s, missing session, etc.), then a GIF (Unity Recorder → gifski) committed under `docs/pr-videos/` when even that isn't an option. Verifies every step end-to-end — file exists and has non-zero duration, upload URL returns HTTP 200, PR body's rendered HTML actually contains a `<video>` tag pointing at the uploaded asset. Never leaves a broken PR. Use when the user asks to record a PR video, capture a Unity video for the PR, add a video demo to the PR, screencast the change for review, "show the reviewer the animation", or "attach a video to this PR".
 allowed-tools: "Bash(git *) Bash(gh *) Bash(gh attach *) Bash(mkdir *) Bash(ls *) Bash(rm *) Bash(du *) Bash(brew *) Bash(which *) Bash(gifski *) Bash(ffmpeg *) Bash(ffprobe *) Bash(curl *) Bash(stat *) Read Write Edit"
 argument-hint: "[duration-seconds] [PR-number]"
 ---
@@ -34,7 +34,7 @@ argument-hint: "[duration-seconds] [PR-number]"
 
 **`gh attach` session valid?** (browser-session cookie must be logged in)
 ```
-!`gh attach whoami 2>/dev/null || echo "NOT LOGGED IN — one-time setup: gh attach login (opens browser, saves cookie to keychain)"`
+!`gh attach login --status 2>/dev/null || echo "NOT LOGGED IN — one-time setup: gh attach login (opens browser, saves cookie to keychain)"`
 ```
 
 **Existing pr-videos directory (used only by the GIF fallback):**
@@ -44,13 +44,18 @@ argument-hint: "[duration-seconds] [PR-number]"
 
 **Is Unity MCP available?** Confirm `mcp__UnityMCP__execute_code` and `mcp__UnityMCP__manage_editor` are in your tool list this session. Do NOT trust `.mcp.json`'s presence — verify by calling `mcp__UnityMCP__manage_editor` with `action: "get_state"`. If genuinely absent, refuse and point the user at `/unity-mcp-setup` — this skill needs the live Editor.
 
-**Unity Recorder package installed?** Check `Packages/manifest.json` for `com.unity.recorder`. If missing, tell the user how to add it (Window → Package Manager → `+` → Add package by name → `com.unity.recorder`) and stop — do NOT try to install it via `manage_packages` unsupervised.
+**Unity Recorder package installed?** Check `Packages/manifest.json` for `com.unity.recorder`. If missing, either (a) tell the user how to add it via Package Manager, or (b) if they've asked you to install it, add `"com.unity.recorder": "5.1.2"` to `Packages/manifest.json`'s `dependencies` block, then call `mcp__UnityMCP__execute_code` with `UnityEditor.PackageManager.Client.Resolve();` and poll `Packages/packages-lock.json` until the entry appears (30–120s). The default is (a); only do (b) with explicit permission.
 
 ## Task
 
 Record a `$ARGUMENTS[0]`-second clip (default: 8 seconds; hard cap: 30 seconds — anything longer will blow past the 10 MB attachment limit) of the running Unity Editor and embed it as an inline playable video in the Demo section of the current PR (or the PR given as `$ARGUMENTS[1]`).
 
-The pipeline has three tracks. Do them in order — each track's failure is what triggers the next. **Never skip verification gates.** A successful skill run means the reviewer clicks Play in the PR body and the clip plays. Anything less is a failure the skill must report honestly.
+**Two levels of ambition:**
+
+- **Passive record** — just capture whatever the user has staged in the Editor for `duration` seconds. Use when the user says "record what I'm about to do" or the change is already visible without choreography.
+- **Choreographed record** — spawn a `PRVideoDriver` MonoBehaviour that runs the full demo as a single coroutine (setup, interactions, waits, stop). Use when the demo needs to open a modal, click through a flow, hover something to prove it responds, etc. Deterministic timing, no round-trip races, no lost-controller-reference bugs. **Always prefer this shape when the demo has any state changes** — see A3-choreographed below.
+
+The pipeline has four tracks. Do them in order — each track's failure is what triggers the next. **Never skip verification gates.** A successful skill run means the reviewer clicks Play in the PR body and the clip plays. Anything less is a failure the skill must report honestly.
 
 ---
 
@@ -58,97 +63,164 @@ The pipeline has three tracks. Do them in order — each track's failure is what
 
 ### A1. Precheck
 
-- `gh attach whoami` must succeed. If not: refuse and print `gh attach login` for the user to run once. Do NOT try to log in for them — the flow is browser-based and interactive.
+- `gh attach login --status` must report `authenticated as <user>`. If not: refuse and print `gh attach login` for the user to run once. Do NOT try to log in for them — the flow is browser-based and interactive. (Note: `gh attach whoami` is NOT a real subcommand; earlier versions of this skill got that wrong.)
 - `owner/repo` must be resolvable (from `gh repo view` above).
-- A PR must exist on this branch. If not, do steps A2–A7 anyway, save the MP4 to `Temp/pr-video.mp4`, and print the exact `![](URL)` snippet the user can paste when they open the PR.
+- A PR must exist on this branch. If not, do steps A2–A7 anyway, save the MP4 to `Temp/pr-video.mp4`, and print the exact URL snippet the user can paste when they open the PR (bare URL on its own line — NOT `![]()`; see A9).
 
-### A2. Enter Play mode
+### A2. Bootstrap `PRVideoHolder.cs` if missing
 
-```
-mcp__UnityMCP__manage_editor({ action: "get_state" })
-```
-- If `isPlaying: true`, do NOT enter Play mode again (already running — user probably staged the scene). Just proceed to A3.
-- If `isCompiling: true`, wait — poll every 2s, max 60s.
-- If any Play-mode test job is active, refuse — killing it via a Recorder start can leave the Editor in a bad state.
-- Otherwise: `manage_editor({ action: "play" })`, wait 1s, re-check state.
+The Recorder controller reference has to survive between `execute_code` calls, so we stash it on a MonoBehaviour. **The script must live under `Assets/` root, NOT `Assets/Editor/`** — Editor-only scripts throw `Can't add script behaviour 'PRVideoHolder' because it is an editor script.` at `AddComponent<PRVideoHolder>()` in Play mode. The Recorder type lives in the `UnityEditor.Recorder` namespace which isn't available in Player builds, so guard it with `#if UNITY_EDITOR`:
 
-### A3. Start recording via Unity Recorder API
-
-Compute the target path first (absolute, project-local):
-```
-Temp/pr-video-<PR>-<slug>.mp4
-```
-where `<slug>` is a short kebab-case description of the change (derived from the branch name or the PR title). Announce the exact path before recording so the user knows where to look if a step later fails.
-
-Then run this via `mcp__UnityMCP__execute_code` — verbatim, do NOT modify field names, the Recorder API is picky:
+Write to `Assets/PRVideoHolder.cs`:
 
 ```csharp
-using UnityEditor.Recorder;
-using UnityEditor.Recorder.Input;
+using UnityEngine;
 
+// Temporary holder used by the pr-video skill to stash a RecorderController
+// between the Start and Stop execute_code calls. Safe to delete after the run.
+public class PRVideoHolder : MonoBehaviour
+{
+#if UNITY_EDITOR
+    public UnityEditor.Recorder.RecorderController Controller;
+#endif
+}
+```
+
+If the file already exists from a prior run, reuse it. After creating or refreshing it, call `mcp__UnityMCP__refresh_unity` and wait for `isCompiling: false` (poll every 2s, max 30s).
+
+### A3-passive. Start recording (no choreography)
+
+Compute the target path first (absolute, project-local): `Temp/pr-video-<PR>-<slug>.mp4` where `<slug>` is a short kebab-case description of the change (derived from the branch name or PR title). Announce the path before recording.
+
+Then run this via `mcp__UnityMCP__execute_code`. **The `codedom` compiler (default when Microsoft.CodeAnalysis isn't installed) rejects `using` directives inside method bodies with `Unexpected symbol 'UnityEditor', expecting '('`.** So fully-qualify every type — do NOT use `using`:
+
+```csharp
+if (HandManager.Instance == null && !UnityEngine.Application.isPlaying) return "not in Play mode";
 var outputAbs = System.IO.Path.GetFullPath(System.IO.Path.Combine(
     UnityEngine.Application.dataPath, "..", "Temp", "pr-video-<PR>-<slug>.mp4"));
 System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(outputAbs));
 
-var settings = ScriptableObject.CreateInstance<RecorderControllerSettings>();
+var settings = ScriptableObject.CreateInstance<UnityEditor.Recorder.RecorderControllerSettings>();
 settings.SetRecordModeToManual();
 settings.FrameRate = 30;
 settings.CapFrameRate = true;
 
-var movie = ScriptableObject.CreateInstance<MovieRecorderSettings>();
+var movie = ScriptableObject.CreateInstance<UnityEditor.Recorder.MovieRecorderSettings>();
 movie.name = "PR Video";
 movie.Enabled = true;
-movie.OutputFormat = MovieRecorderSettings.VideoRecorderOutputFormat.MP4;
+movie.OutputFormat = UnityEditor.Recorder.MovieRecorderSettings.VideoRecorderOutputFormat.MP4;
 movie.VideoBitRateMode = UnityEditor.VideoBitrateMode.Medium;
-movie.ImageInputSettings = new GameViewInputSettings {
+movie.ImageInputSettings = new UnityEditor.Recorder.Input.GameViewInputSettings {
     OutputWidth  = 1280,
     OutputHeight = 720,
 };
 movie.OutputFile = outputAbs.Replace(".mp4", "");   // Recorder appends the extension itself
-movie.AudioInputSettings.PreserveAudio = false;
-
+if (movie.AudioInputSettings != null) movie.AudioInputSettings.PreserveAudio = false;
 settings.AddRecorderSettings(movie);
 
-var controller = new RecorderController(settings);
+var controller = new UnityEditor.Recorder.RecorderController(settings);
 controller.PrepareRecording();
 controller.StartRecording();
-UnityEngine.Debug.Log("PR_VIDEO_RECORDER_STARTED path=" + outputAbs);
 
-// Stash the controller on a hidden GameObject so the Stop call can find it later
 var host = new GameObject("__PR_VIDEO_HOST__");
 host.hideFlags = HideFlags.HideAndDontSave;
 var holder = host.AddComponent<PRVideoHolder>();
 holder.Controller = controller;
+UnityEngine.Debug.Log("PR_VIDEO_RECORDER_STARTED path=" + outputAbs);
+return outputAbs;
 ```
 
-You will need to define `PRVideoHolder` in an Editor script the FIRST time this skill runs against a project — put it under `Assets/Editor/PRVideoHolder.cs`:
+**Known gotcha:** the very first `PrepareRecording()` call after entering Play mode can throw `NullReferenceException` if execute_code runs before Unity finishes wiring up the Recorder's internal callbacks. If you hit it, exit Play mode, wait 2s, re-enter, wait 5s, retry. Two-tick warm-up is usually enough.
+
+Then wait `duration` seconds (explicit Bash `sleep`, not the `SetRecordModeToManual` timer — the manual timer is less predictable), then jump to A5.
+
+### A3-choreographed. Start recording (with a driver coroutine)
+
+For any demo that needs choreography (open modal, click button, wait for animation, hover cards, etc.), do NOT use the passive pattern above — the "start → Bash sleep → poke the scene via execute_code → Bash sleep → stop" dance is race-prone and the Controller reference can be lost across execute_code calls (domain reload, script recompile, holder GO destroyed early).
+
+Instead, write a `PRVideoDriver` MonoBehaviour to `Assets/PRVideoDriver.cs` that owns the entire recording lifecycle in a single coroutine. Template:
 
 ```csharp
-using UnityEditor.Recorder;
+using System.Collections;
 using UnityEngine;
-public class PRVideoHolder : MonoBehaviour {
-    public RecorderController Controller;
+
+// One-shot driver for the pr-video skill. Records a clip while running the demo
+// as a single coroutine so timing is deterministic and the Recorder controller
+// stays reachable for the Stop call. Delete after the run.
+public class PRVideoDriver : MonoBehaviour
+{
+#if UNITY_EDITOR
+    public UnityEditor.Recorder.RecorderController Controller;
+#endif
+    public string OutputPath;
+    public bool Done;
+
+    IEnumerator Start()
+    {
+        // Give Unity one frame after StartRecording so the first captured frame isn't blank.
+        yield return null;
+
+        // --- BEGIN project-specific choreography ---
+        //   Open the modal, click the button, drive whatever state the demo needs to show.
+        //   Use yield return new WaitForSeconds(...) for pacing; frames tick normally.
+        //   Fire pointer events with UnityEngine.EventSystems.ExecuteEvents.Execute<T>(...).
+        // --- END choreography ---
+
+        yield return new WaitForSeconds(0.5f);   // let the final frame render
+
+#if UNITY_EDITOR
+        if (Controller != null) Controller.StopRecording();
+#endif
+        UnityEngine.Debug.Log("[PRVideoDriver] STOPPED path=" + OutputPath);
+        Done = true;
+    }
 }
 ```
 
-If that file doesn't exist yet, create it BEFORE running the record snippet, and wait ~2s for Unity to compile it (poll `get_state` for `isCompiling: false`).
+Then in ONE `execute_code` call: create the RecorderControllerSettings + MovieRecorderSettings as in A3-passive, `StartRecording()`, and instead of an inert `PRVideoHolder`, spawn:
+
+```csharp
+var driverGo = new GameObject("__PR_VIDEO_DRIVER__");
+driverGo.hideFlags = HideFlags.HideAndDontSave;
+var driver = driverGo.AddComponent<PRVideoDriver>();
+driver.Controller = controller;
+driver.OutputPath = outputAbs;
+```
+
+Then Bash-`sleep` for `duration + 2` seconds (choreography wall-clock + margin) and poll `driver.Done` via a small `execute_code`:
+
+```csharp
+var g = GameObject.Find("__PR_VIDEO_DRIVER__");
+if (g == null) return "driver gone";
+return "done=" + g.GetComponent<PRVideoDriver>().Done;
+```
+
+When `done=True`, jump straight to A6 — the driver has already called `StopRecording()`.
+
+**Why this shape beats the passive one for anything choreographed:**
+- One coroutine, one deterministic timeline. No Bash-sleep vs Unity-frame race.
+- Controller reference stays reachable for `StopRecording()` even if intervening execute_code calls trigger a domain reload (the driver holds it as a serialized field on a live MonoBehaviour).
+- The demo choreography lives in C# next to the scene code it drives, not smeared across N execute_code calls with Bash sleeps between them.
+- Easy to re-run: delete + redeploy `PRVideoDriver.cs`, restart Play mode.
 
 ### A4. Let the recording run
 
-- Wait `duration` seconds using an explicit `wait` (do NOT rely on the `SetRecordModeToManual` timer — it's less predictable than an external wait).
-- During the wait, the user's Editor is playing normally. If the user asked for a specific interaction to be recorded, drive it via other `mcp__UnityMCP__` calls (button clicks via `manage_ui`, scene changes via `manage_scene`, etc.) — but keep the interaction bounded to `duration - 1` seconds so the tail of the clip isn't dead.
+- **A3-passive**: Bash `sleep <duration>`. During the wait you MAY drive the Editor via additional `mcp__UnityMCP__` calls, but every round-trip costs 100–300ms of wall clock and races the coroutine tick. Keep it to no more than 2–3 pokes.
+- **A3-choreographed**: the driver runs on its own; just wait for `driver.Done` to flip. No additional pokes.
 
-### A5. Stop recording
+Either way, hard-cap `duration + safety` at 30 seconds. Longer clips blow past the 10 MB attachment limit at 720p Medium bitrate.
+
+### A5. Stop recording (passive only — choreographed already did it)
 
 ```csharp
 var host = GameObject.Find("__PR_VIDEO_HOST__");
 var holder = host?.GetComponent<PRVideoHolder>();
-holder?.Controller.StopRecording();
-GameObject.DestroyImmediate(host);
+holder?.Controller?.StopRecording();
+if (host != null) GameObject.DestroyImmediate(host);
 UnityEngine.Debug.Log("PR_VIDEO_RECORDER_STOPPED");
 ```
 
-Then `manage_editor({ action: "stop" })` to exit Play mode.
+Then `manage_editor({ action: "stop" })` to exit Play mode. **Both patterns must exit Play mode** — the MP4's moov atom is only finalized when the Recorder's OnDisable/OnDestroy runs, which happens at Play mode exit (or explicit `StopRecording()` on the coroutine driver). If you skip this, `ffprobe` will report `moov atom not found` and Track A will fail A6.
 
 ### A6. Verify the MP4 exists and is valid
 
@@ -160,9 +232,10 @@ ffprobe -v error -show_entries format=duration \
 ```
 
 Fail A → fall to B when:
-- File missing / size 0 → the Recorder didn't write. Usually means Recorder package isn't installed, or `PRVideoHolder.cs` didn't compile.
-- Duration 0 or missing → container is corrupt.
-- Size > 10485760 (10 MB) → will fail the free-plan attachment limit. Fall to B (GIF).
+- File missing / size 0 → the Recorder didn't write. Usually means Recorder package isn't installed, or `PRVideoHolder.cs` / `PRVideoDriver.cs` didn't compile.
+- `moov atom not found` from ffprobe → container is corrupt because Play mode wasn't exited. Redo from A2.
+- Duration 0 or missing → recording never captured any frames.
+- Size > 10485760 (10 MB) → will fail the free-plan attachment limit. Fall to B.
 
 ### A7. Upload via gh attach
 
@@ -176,6 +249,8 @@ gh attach upload "Temp/pr-video-<PR>-<slug>.mp4" \
 Capture stdout — it's the bare URL (looks like `https://github.com/user-attachments/assets/<uuid>`).
 
 Fail A → fall to B when: exit code non-zero, or output doesn't match the `user-attachments/assets/` pattern.
+
+**Known failure mode: `Error: Failed to get upload policy: Unprocessable Entity` (HTTP 422)** — the account/repo pair rejects the pre-flight upload-policy request even though `gh attach login --status` reports authenticated. Reproduces on 73-byte PNGs, so it's not a size/format issue; it's the endpoint refusing this token for this repo (private-repo permission model, missing enterprise flag, etc.). No amount of retry, re-login, or format tweak fixes it. Fall to B immediately when you see 422.
 
 ### A8. Verify the URL is reachable
 
@@ -229,18 +304,51 @@ Delete the local `Temp/pr-video-<PR>-<slug>.mp4` — the source of truth is now 
 
 ---
 
-## Track B — GIF fallback
+## Track B — Chat handoff (when the CDN rejects the upload)
 
-Triggered when any A-gate fails. Runs from whatever intermediate state we're in.
+Triggered when Track A fails at A7 with an API rejection (422, 403, etc.) that isn't a fixable local problem. The MP4 is valid; only the CDN upload is blocked. Committing a GIF is heavier than needed — the user's own browser session in the web UI can always drag-drop-upload to the same CDN. Hand off cleanly:
 
-### B1. Ensure we have a source frame stream
+### B1. Send the MP4 to the user
 
-Two entry points into B:
+```
+SendUserFile({
+  files: ["Temp/pr-video-<PR>-<slug>.mp4"],
+  caption: "MP4 for PR #<PR>. gh-attach hit <error>. Drag this into the Demo section of the PR body — GitHub's web UI will upload to the user-attachments CDN and paste the URL that renders inline as <video>. Then reply 'done' and I'll verify.",
+  status: "proactive"
+})
+```
 
-- **B-from-A** — an MP4 exists from A3–A5 but was too big / didn't upload / didn't render. Reuse it.
-- **B-from-scratch** — Recorder never wrote a valid MP4 (A6 failed). Re-run A2–A6 but change `movie.OutputFormat = MovieRecorderSettings.VideoRecorderOutputFormat.MP4` to also lower to `OutputWidth = 960, OutputHeight = 540`. If it STILL fails, use `mcp__UnityMCP__execute_code` to write PNG frames via `ScreenCapture.CaptureScreenshot` inside an `EditorApplication.update` loop for `duration` seconds — brutish but works when Recorder is broken.
+### B2. Wait for the user
 
-### B2. Convert to GIF via gifski
+Do NOT commit anything, do NOT retry gh attach, do NOT go to Track C on your own. This is the point of the handoff — the user's browser session succeeds where the CLI can't.
+
+### B3. Verify once the user says done
+
+Re-run A10 to confirm the body now contains `<video`. If yes, print:
+```
+✓ Recorded  Temp/pr-video-<PR>-<slug>.mp4 (<size> MB, <duration>s)
+✓ Handed off  MP4 to user (chat) — gh attach rejected with <error>
+✓ User drag-dropped into PR #<PR> Demo section
+✓ Verified  rendered as <video> element
+```
+and delete the local MP4.
+
+If A10 still returns 0, the user probably dropped the file in wrong (attached as download link, or missed the Demo section). Show them the current body and point at what to change; retry verify.
+
+---
+
+## Track C — GIF fallback (when even the chat handoff isn't available)
+
+Triggered when Track B is off the table — headless run with no interactive user, or project rule that forbids drag-drop uploads, or the MP4 exceeded 10 MB and won't fit either path.
+
+### C1. Ensure we have a source frame stream
+
+Two entry points into C:
+
+- **C-from-A** — an MP4 exists from A3–A5 but was too big / didn't upload / didn't render. Reuse it.
+- **C-from-scratch** — Recorder never wrote a valid MP4 (A6 failed). Re-run A2–A6 but change `OutputWidth = 960, OutputHeight = 540` for a smaller MP4. If it STILL fails, use `mcp__UnityMCP__execute_code` to write PNG frames via `UnityEngine.ScreenCapture.CaptureScreenshot` inside an `EditorApplication.update` loop for `duration` seconds — brutish but works when Recorder is broken.
+
+### C2. Convert to GIF via gifski
 
 ```bash
 mkdir -p docs/pr-videos
@@ -250,7 +358,7 @@ ffmpeg -y -i "Temp/pr-video-<PR>-<slug>.mp4" -vf fps=24 -f image2pipe -vcodec pp
 
 If the resulting GIF is > 10 MB, retry with `--quality 70 --width 720`. If still > 10 MB, retry with `--fps 15`. Report each downgrade to the user.
 
-### B3. Commit and push
+### C3. Commit and push
 
 ```bash
 git add "docs/pr-videos/pr-<PR>-<slug>.gif"
@@ -260,7 +368,9 @@ git push
 
 If the branch has no upstream, `git push -u origin <branch>` first. If push fails (rebase needed, hook fails), stop and report — do NOT force-push.
 
-### B4. Edit the PR body
+**Check the project's memory / CLAUDE.md first** — some projects have a firm "no images in the repo" rule (e.g. `PR screenshots never in the repo`). If so, refuse Track C, back off to Track B (chat handoff), and let the user decide.
+
+### C4. Edit the PR body
 
 Same temp-file → Edit → `gh pr edit --body-file` dance as A9. Replace the Demo section content with:
 
@@ -272,7 +382,7 @@ Same temp-file → Edit → `gh pr edit --body-file` dance as A9. Replace the De
 
 Relative paths in PR body markdown resolve against the head SHA of the PR — this is the only reliably-rendering form for a committed image.
 
-### B5. Verify
+### C5. Verify
 
 ```bash
 curl -sI -L -o /dev/null -w "%{http_code}" \
@@ -284,7 +394,7 @@ Must be `200`. Then confirm the rendered HTML has an `<img` with matching src:
 gh api "repos/<owner>/<repo>/pulls/<PR>" --header "Accept: application/vnd.github.html+json" --jq .body_html | grep -c "pr-videos/pr-<PR>-<slug>.gif"
 ```
 
-### B6. Report
+### C6. Report
 
 ```
 ✓ Recorded  MP4 (<size> MB) — fallback triggered because <reason>
@@ -295,9 +405,9 @@ gh api "repos/<owner>/<repo>/pulls/<PR>" --header "Accept: application/vnd.githu
 
 ---
 
-## Track C — Last resort
+## Track D — Last resort
 
-If Track B also fails (git push blocked, gifski broken, ffmpeg missing), commit the MP4 to `docs/pr-videos/`, embed it as `![](docs/pr-videos/pr-<PR>-<slug>.mp4)`, and **explicitly tell the user**:
+If Track C also fails (git push blocked, gifski broken, ffmpeg missing, project forbids committing images), commit the MP4 to `docs/pr-videos/`, embed it as `![](docs/pr-videos/pr-<PR>-<slug>.mp4)`, and **explicitly tell the user**:
 
 > Committed MP4 as `docs/pr-videos/pr-<PR>-<slug>.mp4`. GitHub will render this as a download link, not an inline video. If you want an inline video, drag the MP4 into the PR body manually — GitHub's web UI is the fallback for the fallback.
 
@@ -305,14 +415,26 @@ Then stop. Do not pretend the goal was achieved.
 
 ---
 
+## Cleanup
+
+After ANY successful track:
+- Delete `Assets/PRVideoHolder.cs` and `Assets/PRVideoDriver.cs` (`.meta` files too) — one-shot scaffolding, not part of the project.
+- Delete the local `Temp/pr-video-<PR>-<slug>.mp4` (Track A/B) — the source of truth is on the CDN.
+- If you added `com.unity.recorder` to `Packages/manifest.json` for this run and the project didn't ship with it before, revert the manifest (`git checkout -- Packages/manifest.json Packages/packages-lock.json`) unless the user wants it kept.
+
+---
+
 ## Rules
 
 - **Verify every step**. This skill's whole reason for existing is to not ship broken PRs. Every gate is mandatory — do not "assume it worked".
+- **Prefer the choreographed driver pattern** for anything that involves state changes. The passive `Start → sleep → Stop` shape is fine for "capture what's already on screen" but loses reliably to timing/domain-reload races once the demo has more than one moving part.
 - **Never enter Play mode without checking `get_state` first.** Killing an active test job or stomping on the user's staged scene is a bad experience.
-- **Never keep the local MP4** after a successful A-track upload — it's just clutter.
-- **Never commit an MP4 unless Track C is triggered.** Committed MP4s bloat the repo history without giving a good PR experience.
-- **Refuse cleanly** if any prereq is missing (Recorder package, gh-attach, browser-session login) — print the exact one-line install/setup command and stop. Do not try to install packages unsupervised.
+- **Never keep the local MP4** after a successful upload — it's just clutter.
+- **Never commit an MP4 unless Track D is triggered.** Committed MP4s bloat the repo history without giving a good PR experience.
+- **Refuse cleanly** if any prereq is missing (Recorder package, gh-attach, browser-session login) — print the exact one-line install/setup command and stop. Only add the Recorder package with explicit permission.
 - **Do NOT use `sed` on PR bodies.** Always the temp-file + Edit + `--body-file` pattern. PR bodies routinely contain characters that break shell substitution.
 - **Do NOT wrap the user-attachments URL in `![]()`** — for video attachments, the bare URL on its own line is the form GitHub renders inline. Markdown image syntax turns it into an `<img>` that won't play.
-- **Respect the size cap.** 10 MB free / 100 MB paid — the skill doesn't know which the user is on, so treat 10 MB as the hard ceiling for Track A and fall to B when exceeded.
+- **Do NOT use `using` directives inside execute_code snippets** — CodeDom (the default compiler) rejects them. Fully-qualify types.
+- **Do NOT put `PRVideoHolder` / `PRVideoDriver` under `Assets/Editor/`** — they get compiled as Editor-only and Unity refuses to `AddComponent` them at runtime. `Assets/` root, with `#if UNITY_EDITOR` on the Recorder field.
+- **Respect the size cap.** 10 MB free / 100 MB paid — the skill doesn't know which the user is on, so treat 10 MB as the hard ceiling for Track A and fall through for larger.
 - **Duration cap.** Hard-refuse `> 30` seconds — clips longer than that are (a) way over the attachment limit at 720p, (b) not what reviewers watch. Suggest breaking the demo into multiple PRs if the user pushes back.
