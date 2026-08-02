@@ -71,6 +71,41 @@ This case has hit repeatedly in long sessions (5+ times in one). Recognize it fa
 
 ---
 
+### Section 2b — MCP is bound to a different worktree's Editor (multi-Editor case)
+
+Symptoms: `ReadMcpResourceTool mcpforunity://instances` shows one instance whose `name` is a DIFFERENT worktree, not yours. Your Editor is running (`pgrep` shows it at your worktree path) but doesn't appear in the instance list, so every MCP call routes to the wrong project — or `set_active_instance <yours>` fails with "Instance hash does not match any running Unity editors."
+
+Why: Coplay's Editor plugin only tries to spawn / register with the Python bridge at Editor **init**. The Python process is pinned to whichever Editor spawned it — a second Editor booting later can't register with an already-owned bridge on its own. See `unity-start-task` Case C for the full explanation; this section is the mid-session variant.
+
+The fix is `unity-start-task`'s Case C shape, but scoped to your one worktree without creating a new one:
+
+```bash
+# 1. Kill just the Python bridge — leaves every Editor process running.
+pkill -f "mcp-for-unity --transport http" 2>/dev/null
+pkill -f "uvx.*mcp-for-unity" 2>/dev/null
+sleep 2
+lsof -nP -iTCP:8080 -sTCP:LISTEN   # must be empty
+
+# 2. Kill only YOUR Editor — match on your worktree path. NEVER `pkill Unity`.
+mine=$(pgrep -f "Unity\.app/Contents/MacOS/Unity -projectPath <your-worktree>")
+[ -n "$mine" ] && kill "$mine" && sleep 5
+
+# 3. Relaunch YOUR Editor. Its Coplay code spawns a fresh Python bridge pinned to YOUR token.
+nohup "/Applications/Unity/Hub/Editor/<version>/Unity.app/Contents/MacOS/Unity" \
+  -projectPath "<your-worktree>" > "<your-worktree>/test-results/editor.log" 2>&1 &
+disown
+```
+
+Then wait for `mcpforunity://instances` to show BOTH yours AND the other Editors (this is the pattern — after step 3, the untouched Editors' Coplay plugins auto-re-register with the new bridge as separate instances). Pin: `set_active_instance <your-Name@hash>`. Verify: `execute_code { return UnityEngine.Application.dataPath; }` — must end in `<your-worktree>/Assets`.
+
+**Don't:**
+- Kill any Editor other than the one at your worktree path.
+- Try to change the port via EditorPref (`MCPForUnity.HttpUrl`) — it's Unity-installation-wide, so all Editors of one Unity version read the same value. Per-editor port config only works for STDIO transport, not the HTTP one Claude Code uses.
+- Add a second `unity-8081` MCP registration to `~/.claude.json` to route in parallel — the new tools don't appear in a session that was launched before the addition (MCP tools bind at session start). Only helps future sessions.
+- Wait for Coplay to auto-recover on its own — it does not retry the launch. The kill+restart above is what actually recovers.
+
+---
+
 ### Section 3 — Screenshot cadence for UI PRs
 
 For any PR that touches UI (`*.unity`, `*.prefab`, `Assets/**/*.png`, HUD scripts), every code change deserves an inline screenshot in the same response — not a batched delivery, not "let me finish these three changes and then show you." The user shouldn't have to ask.
