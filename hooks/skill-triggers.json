@@ -1,5 +1,6 @@
 {
-  "_comment": "Data-driven trigger map for hooks/suggest-skill.sh. Each rule fires a system-reminder nudging the model toward a plugin skill instead of inline reimplementation. Edit this file to add / tune rules \u2014 the shell script is intentionally dumb about the mappings.",
+  "_comment": "Data-driven trigger map for hooks/suggest-skill.sh. Each rule fires a system-reminder nudging the model toward a plugin skill instead of inline reimplementation. Edit this file to add / tune rules — the shell script is intentionally dumb about the mappings.",
+
   "bash_command": [
     {
       "pattern": "gh[[:space:]]+pr[[:space:]]+create",
@@ -14,17 +15,17 @@
     {
       "pattern": "UnityEngine\\.ScreenCapture\\.CaptureScreenshot|screencapture[[:space:]]",
       "skill": "pr-screenshot",
-      "why": "captures the Play-mode screenshot AND embeds it in the PR Demo section \u2014 you still get to pick the moment / scene"
+      "why": "captures the Play-mode screenshot AND embeds it in the PR Demo section — you still get to pick the moment / scene"
     },
     {
       "pattern": "gh[[:space:]]+attach[[:space:]]+upload|user-attachments/assets",
       "skill": "unity-e2e-verify",
-      "why": "the full workflow of driving Play mode via UI dispatch, capturing at each state, and posting a structured verification comment with CDN-hosted inline images (private-repo safe) \u2014 one skill call instead of 20"
+      "why": "the full workflow of driving Play mode via UI dispatch, capturing at each state, and posting a structured verification comment with CDN-hosted inline images (private-repo safe) — one skill call instead of 20"
     },
     {
       "pattern": "onClick\\.Invoke\\(\\)|FindFirstObjectByType.*(MainMenu|LobbyUI|LobbyManager|HandManager)",
       "skill": "unity-e2e-verify",
-      "why": "you're driving the UI via event dispatch \u2014 this skill wraps the full drive + capture + Console-grep + PR-comment loop with the private-repo-safe upload path baked in"
+      "why": "you're driving the UI via event dispatch — this skill wraps the full drive + capture + Console-grep + PR-comment loop with the private-repo-safe upload path baked in"
     },
     {
       "pattern": "Unity(Recorder|Recording)|-recorderTakeFPS|Movie[Rr]ecorder|screencapture[[:space:]]+-[a-z]*v",
@@ -58,11 +59,12 @@
       "severity": "warn"
     }
   ],
+
   "user_prompt": [
     {
       "pattern": "(?i)(write|draft|create|open).{0,20}(pull request|\\bpr\\b)",
       "skill": "pr-description",
-      "why": "drafts the PR body \u2014 trigger this before hand-writing a description"
+      "why": "drafts the PR body — trigger this before hand-writing a description"
     },
     {
       "pattern": "(?i)(take|grab|add|attach|include).{0,30}(screenshot|demo image|demo shot)",
@@ -100,9 +102,8 @@
       "why": "the batchmode Standalone build path with per-target BuildScript methods"
     },
     {
-      "pattern": "lsof[[:space:]]+.*:640[0-9]|claude[[:space:]]+mcp[[:space:]]+list.*(unity|coplay)",
-      "skill": "unity-mcp-setup",
-      "why": "already covers every diagnostic path for Unity MCP over stdio (uv/uvx, Coplay package, the Editor's 6400+ socket and status file, Claude Code registration)"
+      "pattern": "(?i)set up (steam|mcp|multiplayer|mppm|unity mcp|smart merge)",
+      "skill": "unity-mcp-setup"
     }
   ]
 }

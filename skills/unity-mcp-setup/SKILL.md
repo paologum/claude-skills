@@ -1,7 +1,7 @@
 ---
 name: unity-mcp-setup
 description: Diagnoses whether Coplay's Unity MCP is correctly set up for the current Unity project and walks the user through fixing anything missing. Checks uv/uvx installation, the Coplay package in the project, the Editor's stdio bridge socket, and Claude Code's MCP registration. Use when the user asks to set up Unity MCP, connect Claude to Unity, configure the Unity MCP, "why isn't Unity MCP working", or troubleshoots MCP tool calls failing against Unity.
-allowed-tools: "Read Bash(which *) Bash(ls *) Bash(cat *) Bash(lsof *) Bash(ps *) Bash(claude mcp *) Bash(grep *) Bash(brew *) Bash(find *) Glob"
+allowed-tools: "Read Bash(pwd) Bash(which *) Bash(uv --version) Bash(uvx --version) Bash(ls *) Bash(cat *) Bash(lsof *) Bash(ps *) Bash(claude mcp *) Bash(grep *) Bash(brew *) Bash(find *) Glob"
 ---
 
 ## Transport: stdio
@@ -113,8 +113,13 @@ Write it into the Unity project's `.mcp.json` (project scope, checked in, everyo
 the repo gets it), or register it for just this user:
 
 ```bash
-claude mcp add UnityMCP --scope user -- uvx --from mcpforunityserver mcp-for-unity --transport stdio
+claude mcp add UnityMCP --scope user -- "$(which uvx)" --from mcpforunityserver mcp-for-unity --transport stdio
 ```
+
+**Resolve `uvx` to an absolute path** when you write the config, rather than leaving the
+bare name. MCP servers are spawned from the client's environment, not from an interactive
+shell that sourced the user's profile, so a GUI-launched client frequently can't find a
+Homebrew `uvx` on PATH — and that failure costs the whole session (see Pitfalls).
 
 The server name **must** be `UnityMCP` — every skill in this plugin calls
 `mcp__UnityMCP__*` tools by that name.
@@ -133,12 +138,13 @@ A real response means the whole chain works.
 
 ### Pitfalls
 
-- **`uvx` not on PATH in the launching environment.** The one genuine stdio failure mode:
-  if `uvx` can't be resolved when Claude Code spawns the server, the server never starts
-  and **no Unity tools exist for the entire session** — there is no mid-session recovery
-  the way HTTP had. Symptom: `mcp__UnityMCP__*` absent, `claude mcp list` shows UnityMCP
-  as failed. Fix: use the absolute path (`/opt/homebrew/bin/uvx`) as `command`, then
-  restart the session.
+- **`uvx` not resolvable in the launching environment.** The one genuine stdio failure
+  mode, and the reason step 5 writes an absolute path: MCP servers are spawned from the
+  client's environment, not from a shell that sourced the user's profile. If `uvx` can't
+  be resolved the server never starts and **no Unity tools exist for the entire session**
+  — there is no mid-session recovery the way HTTP had. Symptom: `mcp__UnityMCP__*` absent,
+  `claude mcp list` shows UnityMCP as failed. Fix: put the output of `which uvx` in
+  `command`, then restart the session.
 - **Tools bind at session start.** A server registered mid-session isn't attached, and
   `/reload-plugins` does not re-attach MCP tools — it updates config only. Restart the
   session. Likewise `/resume` restores the old session's tool binding; use a bare `claude`.

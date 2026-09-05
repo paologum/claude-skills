@@ -77,9 +77,11 @@ just a file you can check in. The canonical one ships here as
 3. **Set the transport:** Open the project, press **`Cmd+Shift+M`**, set the **Transport** dropdown to **Stdio**.
 4. **Register Claude Code:** copy `templates/unity-mcp.mcp.json` to the Unity project's `.mcp.json`, or run:
    ```
-   claude mcp add UnityMCP --scope user -- uvx --from mcpforunityserver mcp-for-unity --transport stdio
+   claude mcp add UnityMCP --scope user -- "$(which uvx)" --from mcpforunityserver mcp-for-unity --transport stdio
    ```
    The server must be named `UnityMCP` — the skills call `mcp__UnityMCP__*` by that name.
+   Use the absolute path to `uvx`: MCP servers are spawned from the client's environment,
+   which a GUI-launched client doesn't inherit from your shell profile.
 5. **Fresh session:** Exit any running Claude session and start `claude` in the Unity project directory (no `/resume`) — MCP tools only bind at session start.
 
 Run `/unity-mcp-setup` to diagnose any of the above.

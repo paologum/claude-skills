@@ -12,9 +12,11 @@ payload=$(cat)
 cmd=$(printf '%s' "$payload" | jq -r '.tool_input.command // empty' 2>/dev/null)
 [ -z "$cmd" ] && exit 0
 
-# Skip when the command is writing a file rather than running a poll — authoring or
-# editing these very skills embeds the patterns below as documentation text.
-if printf '%s' "$cmd" | grep -qE '<<[[:space:]]*.?(PY|EOF|MDEOF|JSON)|^[[:space:]]*(python3?|node)[[:space:]]+[^|]*\.(py|js)[[:space:]]*$'; then
+# Authoring these skills embeds the patterns below as documentation text. Exempt only a
+# command that is *nothing but* running a script file — deliberately narrow, because an
+# exemption that matches part of a compound command fails open on the rest of it. To edit
+# a file containing these patterns, put the edit in a script and run it.
+if printf '%s' "$cmd" | grep -qE '^[[:space:]]*(python3?|node)[[:space:]]+[^;&|]+\.(py|js)[[:space:]]*$'; then
   exit 0
 fi
 
