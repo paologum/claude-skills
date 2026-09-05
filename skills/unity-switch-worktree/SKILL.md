@@ -1,6 +1,6 @@
 ---
 name: unity-switch-worktree
-description: Restarts the Unity Editor on a different project path — closes the currently-running Editor, launches it on the target worktree, waits for Coplay's MCP bridge to come back online, and rebinds the MCP session to the new instance so `mcp__UnityMCP__*` tool calls route correctly. Use when the user says "switch Unity to <path>", "open Unity on the #NNN worktree", "restart Unity on this worktree", "point Unity at the other branch", or when Play-mode / MCP-driven work has to happen on a branch different from where the Editor is currently open. Especially useful for git-worktree workflows where Steam / networking / lobby PRs live on separate branches and need Editor-driven verification one at a time.
+description: Restarts the Unity Editor on a different project path — closes the currently-running Editor, launches it on the target worktree, waits for the new Editor's stdio bridge to register, and rebinds the MCP session to the new instance so `mcp__UnityMCP__*` tool calls route correctly. Use when the user says "switch Unity to <path>", "open Unity on the #NNN worktree", "restart Unity on this worktree", "point Unity at the other branch", or when Play-mode / MCP-driven work has to happen on a branch different from where the Editor is currently open. Especially useful for git-worktree workflows where Steam / networking / lobby PRs live on separate branches and need Editor-driven verification one at a time.
 allowed-tools: "Read Bash(ls *) Bash(pgrep *) Bash(ps *) Bash(kill *) Bash(pkill *) Bash(osascript *) Bash(sleep *) Bash(lsof *) Bash(nohup *) Bash(disown *) Bash(mkdir *) Bash(git *) Bash(basename *) Bash(cat *) Bash(head *) Bash(tail *) Bash(dirname *)"
 argument-hint: "<target-project-path | worktree-name>"
 ---
@@ -22,9 +22,9 @@ argument-hint: "<target-project-path | worktree-name>"
 !`ps -eo pid,args | awk '/Unity\.app\/Contents\/MacOS\/Unity/ && /-projectPath/ && !/awk/' | head -5 || echo "no Editor currently open"`
 ```
 
-**Coplay MCP bridge port status (Editor holds it once running):**
+**Unity Editors currently publishing a stdio bridge (port + project):**
 ```
-!`lsof -nP -iTCP:8080 -sTCP:LISTEN 2>/dev/null | head -3 || echo "port 8080 free"`
+!`cat ~/.unity-mcp/unity-mcp-status-*.json 2>/dev/null || echo "no Editor bridges registered"`
 ```
 
 **Installed Unity Editor versions:**
@@ -55,6 +55,12 @@ If the binary isn't present, stop and tell the user to install that Editor versi
 
 ### Step 2 — close the currently-running Editor (if any)
 
+Close it only because the user asked to *switch*. Under stdio it is not required for MCP:
+Editors don't contend for a port (each takes its own — 6400, 6401, ...) and the MCP server
+belongs to your Claude Code session, not to any Editor. If the user actually wants both
+projects open at once, don't close anything — launch the second Editor and pin with
+`set_active_instance` (see `/unity-start-task`).
+
 Try graceful quit first, fall back to signal:
 
 ```bash
@@ -73,7 +79,7 @@ editor_pid=$(pgrep -f "Unity\.app/Contents/MacOS/Unity -projectPath" | head -1)
 
 - **Never `pkill -9 -f Unity`** — that also kills Unity Hub, the licensing client, and any MPPM clones. Match on `Unity.app/Contents/MacOS/Unity -projectPath` specifically.
 - **Save the user's work first if there might be unsaved scene edits.** If the Editor is currently focused and you're not sure, warn the user before killing and give them 10 seconds to `Cmd+S`.
-- Wait until `pgrep -f "Unity\.app/Contents/MacOS/Unity -projectPath"` returns empty. If the old Editor is still holding the Coplay HTTP port (`lsof -nP -iTCP:8080 -sTCP:LISTEN`), the new one will fail to bind.
+- Wait until `pgrep -f "Unity\.app/Contents/MacOS/Unity -projectPath"` returns empty before launching the new one, so a switch doesn't silently leave you with two Editors. The old Editor's status file disappears shortly after it exits.
 
 ### Step 3 — launch the new Editor detached
 
@@ -87,26 +93,22 @@ Editor startup on a fresh `Library/` can take 2–10 minutes (asset import). Do 
 
 ### Step 4 — wait for the MCP bridge to appear, correctly
 
-The right check is the MCP resource `mcpforunity://instances`, not an HTTP GET on port 8080 (the bridge does not answer plain GET at `/` — polling that with `curl` hangs your Monitor until timeout). Two forms:
+The check is the MCP resource `mcpforunity://instances`. Two forms:
 
-**When you have `ReadMcpResourceTool` in your toolset**, call it directly and inspect `data.instances[]` for one whose `name` matches the target worktree's basename. When it appears, capture its full `id` (e.g. `github-issue-133-7904c4@c419cb5374192e4d`).
+**When you have `ReadMcpResourceTool` in your toolset**, call it directly and inspect
+`data.instances[]` for one whose `path` is under the target worktree. When it appears,
+capture its full `id` (e.g. `github-issue-133-7904c4@c419cb5374192e4d`). Match on `path`,
+not `name` — two worktrees of the same repo report the same project name.
 
-**When you don't have that tool** (rare — usually deferred until after ToolSearch), fall back to polling the on-disk pidfile the MCP server writes:
+**When you don't have that tool** (rare — usually deferred until after ToolSearch), read
+the status file the Editor publishes:
 
 ```bash
-pid_glob="<target>/Library/MCPForUnity/RunState/mcp_http_*.pid"
-# Wait up to 10 minutes for the pidfile to appear (Unity import can be slow)
-end=$(( $(date +%s) + 600 ))
-while [ $(date +%s) -lt $end ]; do
-  if ls $pid_glob >/dev/null 2>&1; then
-    echo "MCP_READY"
-    break
-  fi
-  sleep 15
-done
+grep -l "<target>/Assets" ~/.unity-mcp/unity-mcp-status-*.json
 ```
 
-Do NOT use `curl http://127.0.0.1:8080` as the readiness check — it hangs. This is the specific mistake this skill exists to prevent.
+Either way, **don't wrap it in a shell polling loop.** Unity import can take 2-10 minutes;
+use `ScheduleWakeup` (60-90s) between checks so the session isn't blocked.
 
 If the Editor process died before the bridge came up, check `<target>/test-results/editor.log` for compile errors or license failures before retrying.
 
@@ -144,7 +146,8 @@ If the user asked to switch as a step toward another workflow (screenshots, Play
 ## Don'ts
 
 - Don't `pkill Unity` or `killall Unity`. Kill the specific Editor process by matching on `Unity.app/Contents/MacOS/Unity -projectPath`.
-- Don't check bridge readiness by polling `curl http://127.0.0.1:8080` — the endpoint doesn't answer plain GET; the Monitor / Bash `until` loop will hang until timeout. Use the MCP resource or the on-disk pidfile.
+- Don't check readiness with a shell polling loop. Use `mcpforunity://instances` (or a single `cat` of the status files) with `ScheduleWakeup` between attempts.
+- Don't kill the MCP server to "reconnect it" after the switch. It never disconnected — it is a child of your Claude Code session and survives Editor restarts. Killing it removes the Unity tools for the rest of the session with no way to rebind.
 - Don't skip Step 6. `set_active_instance` returning success only means the server accepted the request — it doesn't confirm the tool calls will route to the new project. A stale session shows up as "code executes but returns dataPath from the old worktree."
 - Don't attempt to switch while the current Editor has unsaved changes without warning the user. There is no undo.
 - Don't launch the new Editor in the foreground and wait for it — go async, poll for readiness in Step 4.

@@ -1,8 +1,30 @@
 ---
 name: unity-mcp-setup
-description: Diagnoses whether Coplay's Unity MCP is correctly set up for the current Unity project and walks the user through fixing anything missing. Checks uv/uvx installation, Python discoverability (pyenv gotchas), Coplay package presence in the Unity project, Editor bridge status on port 8080, and Claude Code MCP registration. Use when the user asks to set up Unity MCP, connect Claude to Unity, configure the Unity MCP, "why isn't Unity MCP working", or troubleshoots MCP tool calls failing against Unity.
-allowed-tools: "Read Bash(which *) Bash(pyenv *) Bash(brew *) Bash(ls *) Bash(cat *) Bash(lsof *) Bash(ps *) Bash(claude mcp *) Bash(grep *) Bash(*/python* --version) Bash(/opt/homebrew/bin/* --version) Bash(find *) Glob"
+description: Diagnoses whether Coplay's Unity MCP is correctly set up for the current Unity project and walks the user through fixing anything missing. Checks uv/uvx installation, the Coplay package in the project, the Editor's stdio bridge socket, and Claude Code's MCP registration. Use when the user asks to set up Unity MCP, connect Claude to Unity, configure the Unity MCP, "why isn't Unity MCP working", or troubleshoots MCP tool calls failing against Unity.
+allowed-tools: "Read Bash(which *) Bash(ls *) Bash(cat *) Bash(lsof *) Bash(ps *) Bash(claude mcp *) Bash(grep *) Bash(brew *) Bash(find *) Glob"
 ---
+
+## Transport: stdio
+
+This project family runs MCP for Unity over **stdio**, not HTTP. That choice decides
+most of what follows, so understand the shape before diagnosing:
+
+- **Claude Code spawns the server** (`uvx … mcp-for-unity --transport stdio`) as a child
+  process of the session. Unity does not spawn anything.
+- **The Unity Editor is just a TCP listener** on port 6400 (6401, 6402… for additional
+  Editors). It publishes `~/.unity-mcp/unity-mcp-status-<hash>.json` with its port,
+  `project_path`, `reloading` flag and heartbeat. The server discovers Editors by
+  scanning those files and probing the ports.
+- **There is no auth token and no shared bridge.** Nothing is pinned to "whichever
+  Editor started it".
+- **Tool binding is independent of Unity.** The server starts, binds its ~47 tools and
+  stays alive even with zero Editors running; calls just fail with
+  `"No Unity Editor instances found"` until one appears. So Unity can be closed,
+  restarted or pointed at another worktree mid-session without losing MCP tools.
+
+The practical consequence: **almost every "the bridge died" symptom is not a thing
+anymore.** If tools are missing, it is a registration/session problem. If tools are
+present but calls fail, it is a Unity-side problem. Those are the only two branches.
 
 ## Environment diagnostics
 
@@ -11,24 +33,9 @@ allowed-tools: "Read Bash(which *) Bash(pyenv *) Bash(brew *) Bash(ls *) Bash(ca
 !`pwd`
 ```
 
-**Is `uv` installed? (required — `uvx` and the Coplay HTTP server depend on it)**
+**Is `uv` installed? (`uvx` runs the MCP server)**
 ```
-!`which uv 2>/dev/null && uv --version 2>/dev/null || echo "MISSING: run 'brew install uv'"`
-```
-
-**pyenv shim Python (Coplay's Editor auto-detector checks `~/.pyenv/shims` first; if it returns < 3.10, Coplay rejects it silently):**
-```
-!`~/.pyenv/shims/python3 --version 2>/dev/null || echo "no pyenv shim"`
-```
-
-**pyenv global (if this is < 3.10, run `pyenv global 3.11.9` to fix):**
-```
-!`pyenv version 2>/dev/null || echo "pyenv not installed"`
-```
-
-**Homebrew Python (Coplay's fallback):**
-```
-!`/opt/homebrew/bin/python3 --version 2>/dev/null || echo "no /opt/homebrew/bin/python3 — brew install python@3.11"`
+!`which uvx 2>/dev/null && uv --version 2>/dev/null || echo "MISSING: run 'brew install uv'"`
 ```
 
 **Coplay package in current project's `Packages/manifest.json`:**
@@ -36,113 +43,129 @@ allowed-tools: "Read Bash(which *) Bash(pyenv *) Bash(brew *) Bash(ls *) Bash(ca
 !`grep -o "com.coplaydev.unity-mcp[^\"]*" Packages/manifest.json 2>/dev/null || echo "MISSING — add via Unity: Window → Package Manager → + → Add package from git URL"`
 ```
 
-**Is the Unity Editor open with a project? (Coplay HTTP server must be listening on 8080):**
+**Unity Editors publishing a stdio bridge (port, project, heartbeat):**
 ```
-!`lsof -nP -iTCP:8080 -sTCP:LISTEN 2>/dev/null | grep -iE "python|mcp-for-unity" | head -1 || echo "Nothing listening on 8080 — open Unity Editor and press Cmd+Shift+M to start the bridge"`
+!`cat ~/.unity-mcp/unity-mcp-status-*.json 2>/dev/null || echo "No status files — no Editor has started its bridge"`
 ```
 
-**What Claude Code has registered for `unity` MCP:**
+**Is an Editor actually listening on its socket?**
+```
+!`lsof -nP -iTCP:6400-6410 -sTCP:LISTEN 2>/dev/null | head -5 || echo "Nothing listening on 6400-6410 — open the Unity Editor and check the MCP window"`
+```
+
+**What Claude Code has registered for Unity MCP:**
 ```
 !`claude mcp list 2>&1 | grep -iE "unity|coplay" | head -5 || echo "no unity/coplay MCP registered"`
 ```
 
-**Any leftover stdio registration (this must be removed — it fights with the HTTP one):**
-```
-!`claude mcp list 2>&1 | grep -E "uvx.*coplay-mcp-server" | head -3 || echo "no stale stdio entries"`
-```
-
 ## Your task
 
-Based on the diagnostics above, print a clean status table for the user (✓ / ✗ per component), then walk them through fixing each `✗` in order. Do not run destructive commands (`claude mcp remove`, package installs) without asking.
+Print a clean status table (✓ / ✗ per component), then walk the user through fixing the
+**earliest** `✗` only. Don't run `claude mcp remove` or package installs without asking.
 
 ### The setup, in the order it must happen
-
-Each step depends on the previous. Do not skip ahead.
 
 **1. `uv` installed system-wide.**
 ```bash
 brew install uv
 ```
 
-**2. Python 3.10+ discoverable via one of the paths Coplay searches** (in this priority order: `~/.pyenv/shims`, `/opt/homebrew/bin`, `/usr/local/bin`).
+**2. Coplay's Unity package installed in the project.**
 
-The most common failure mode: **pyenv global is set to Python 3.9.x** (often via `~/.python-version`), so `~/.pyenv/shims/python3` returns 3.9 and Coplay's Editor plugin rejects it. Fix:
-
-```bash
-pyenv global 3.11.9    # or any 3.10+ pyenv already has installed
-```
-
-Verify: `~/.pyenv/shims/python3 --version` should now print 3.11.x or newer.
-
-**3. Coplay's Unity package installed in the current project.**
-
-In the Unity Editor: **Window → Package Manager → `+` → Add package from git URL**:
+Unity: **Window → Package Manager → `+` → Add package from git URL**:
 
 ```
 https://github.com/CoplayDev/unity-mcp.git?path=/MCPForUnity
 ```
 
-Or via OpenUPM if scoped registries are set up:
+**3. Open the project in the Unity Editor** and wait for the import to finish.
 
-```bash
-openupm add com.coplaydev.unity-mcp
+**4. Set the Editor's transport to Stdio.**
+
+Press **`Cmd+Shift+M`** (or **Window → MCP for Unity → Toggle MCP Window**). In the
+Connection section, set the **Transport** dropdown to **Stdio**. The **Unity Port**
+field below it shows the socket the Editor listens on — 6400 by default, auto-incremented
+if another Editor already holds it.
+
+Confirm it took: a `~/.unity-mcp/unity-mcp-status-*.json` appears whose `project_path`
+is this project's `Assets` directory, and `lsof -nP -iTCP:6400-6410 -sTCP:LISTEN` shows
+Unity holding a port.
+
+**5. Register the MCP server with Claude Code.**
+
+Unlike HTTP, the stdio command line is identical for every project and every Editor —
+nothing project-specific, nothing that goes stale. The canonical config ships with this
+plugin at `templates/unity-mcp.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "UnityMCP": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["--from", "mcpforunityserver", "mcp-for-unity", "--transport", "stdio"]
+    }
+  }
+}
 ```
 
-**4. Open the Guandan (or target) project in the Unity Editor.** Wait for it to finish importing.
-
-**5. Start the Coplay Editor bridge.**
-
-Inside the Unity Editor, press **`Cmd+Shift+M`** (or menu: **Window → MCP for Unity → Toggle MCP Window**). Wait for the window's "Server Running" indicator to go green. This spawns the `mcp-for-unity` HTTP server on `127.0.0.1:8080`.
-
-**6. Register Claude Code as a client — through the Coplay UI, not by hand.**
-
-In the MCP for Unity window, find the **Clients** section listing Cursor / Claude Code / VS Code / etc. Click **Configure** (or **Install**) next to **Claude Code**. Coplay writes an HTTP-transport MCP entry into `~/.claude.json` with the current auth token baked in.
-
-**Do not** manually run `claude mcp add ... uvx coplay-mcp-server@latest`. That's the OLD stdio architecture and it won't reach the new HTTP-based Editor bridge. If a stale entry exists, remove it first:
+Write it into the Unity project's `.mcp.json` (project scope, checked in, everyone on
+the repo gets it), or register it for just this user:
 
 ```bash
-claude mcp remove unity --scope user
+claude mcp add UnityMCP --scope user -- uvx --from mcpforunityserver mcp-for-unity --transport stdio
 ```
 
-**7. Verify.**
+The server name **must** be `UnityMCP` — every skill in this plugin calls
+`mcp__UnityMCP__*` tools by that name.
 
-```bash
-claude mcp list
-```
+Coplay's own **Configure Claude Code** button in the MCP window writes an equivalent
+entry. Either route works; the button additionally respects a prerelease Unity package
+by pinning `--prerelease explicit --from "mcpforunityserver>=0.0.0a0"`.
 
-The `unity` line should show `http://127.0.0.1:8080` (not a `uvx …` command).
+**6. Start a fresh Claude session in the Unity project directory.**
 
-**8. Start a fresh Claude session in the Unity project directory.**
-
-MCP tool registration happens at session start. An already-running session will not pick up new MCP tools even after `/reload-plugins`. Exit the current session and start a fresh `claude` in the project directory (no `/resume`). Try:
+MCP tools bind at session start. Exit and start a bare `claude` (no `/resume`), then:
 
 > *"call the unity get_editor_state tool"*
 
-A real response means the full chain is working.
+A real response means the whole chain works.
 
-### Pitfalls to warn about
+### Pitfalls
 
-- **MCP "connected" in the health check but its tools aren't in the callable toolset.** Symptom: `claude mcp list` shows `unity` as ✓ connected, but the actual `mcp__UnityMCP__*` tools don't appear in the session's tool registry, so calls like `find_gameobjects` fail with "no such tool." This is **not** a connection problem — the server handshake succeeded but tool *binding* happens only at session start. Causes, in order of likelihood: (1) the MCP connected mid-session — tools bind at launch, so a server that came up after the session started isn't attached; (2) the session was `/resume`d from before the MCP existed; (3) two `unity`/`coplay` registrations exist and the tool-less one won. Fix: exit and start a **bare `claude`** in the project dir (no `/resume`), after confirming `claude mcp list` shows exactly one `unity` entry on `http://127.0.0.1:8080`. Do **not** trust a green health check as proof the tools are callable — verify by actually invoking `mcp__UnityMCP__get_editor_state` (or similar), not by checking the connection status.
-- **pyenv shim returns < 3.10.** Silent rejection. Symptom: "Python not found" in the Coplay Editor window despite `/opt/homebrew/bin/python3 --version` printing 3.13. Fix: `pyenv global 3.11.9`.
-- **Old stdio MCP registration fights the new HTTP one.** If both `plugin:claude-skills:unity` and a user-scope `unity` point at `uvx coplay-mcp-server`, calls fail with "Requests directory missing." Fix: remove both, use only the HTTP one Coplay's UI writes.
-- **Auth token rotates per Editor session.** The token in `--unity-instance-token …` in the running `mcp-for-unity` process changes when the Editor restarts. That's why Coplay's UI button must write the config — a hand-written token goes stale on the next Editor launch.
-- **`/resume` restores the pre-setup tool binding.** Even after fixing everything, `/resume`-ing an old session gives you the old (broken) tool set. Use bare `claude` in the project directory.
-- **`/reload-plugins` does NOT re-attach MCP tools mid-session.** It updates config only. Restart the session.
+- **`uvx` not on PATH in the launching environment.** The one genuine stdio failure mode:
+  if `uvx` can't be resolved when Claude Code spawns the server, the server never starts
+  and **no Unity tools exist for the entire session** — there is no mid-session recovery
+  the way HTTP had. Symptom: `mcp__UnityMCP__*` absent, `claude mcp list` shows UnityMCP
+  as failed. Fix: use the absolute path (`/opt/homebrew/bin/uvx`) as `command`, then
+  restart the session.
+- **Tools bind at session start.** A server registered mid-session isn't attached, and
+  `/reload-plugins` does not re-attach MCP tools — it updates config only. Restart the
+  session. Likewise `/resume` restores the old session's tool binding; use a bare `claude`.
+- **Never trust a green health check as proof the tools are callable.** `claude mcp list`
+  showing ✓ means the handshake succeeded, not that the tools are in this session's
+  registry. Verify by actually invoking `mcp__UnityMCP__get_editor_state`.
+- **Tools present, every call says "No Unity Editor instances found".** The server is
+  fine; Unity isn't listening. Check the status file and the socket (diagnostics above).
+  Usually the Editor is still importing, or its Transport dropdown is not on Stdio.
+- **Multiple Editors, calls landing on the wrong project.** Expected — each Editor is a
+  separate instance. Pin with `mcp__UnityMCP__set_active_instance` using the full
+  `Name@hash`, or pass `unity_instance="6401"` per call. Verify by routing a call and
+  reading `Application.dataPath`. See `/unity-start-task`.
+- **Duplicate registrations.** If both a plugin-scope and a user-scope Unity server
+  exist, one wins arbitrarily. Keep exactly one named `UnityMCP`.
 
 ### Output format
-
-Print exactly this shape:
 
 ```
 Unity MCP setup status
 
- [✓] uv installed
- [✗] Python discoverable at Coplay's paths      ← pyenv shim returns 3.9.9
+ [✓] uv / uvx installed
  [✓] Coplay package in project manifest
- [✗] Editor bridge running on :8080             ← Unity Editor not open, or window not activated
- [✗] Claude Code MCP registered via HTTP        ← still on old stdio path
+ [✗] Editor bridge listening (stdio)          ← no status file; Editor not open, or Transport ≠ Stdio
+ [✗] Claude Code MCP registered (UnityMCP)    ← not in `claude mcp list`
 
-Next step: run `pyenv global 3.11.9`, then open Unity and press Cmd+Shift+M.
+Next step: open Unity, press Cmd+Shift+M, set Transport to Stdio.
 ```
 
-Only show one "Next step" — the earliest ✗ in the list. Don't overwhelm.
+Only show one "Next step" — the earliest ✗. Don't overwhelm.
