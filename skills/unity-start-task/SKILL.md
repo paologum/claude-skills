@@ -1,6 +1,6 @@
 ---
 name: unity-start-task
-description: Starts a new Unity task in an isolated git worktree AND spins up a second Unity Editor on it without touching any Editor already running on another worktree. Handles the Coplay MCP bridge concurrency quirk — the Python `mcp-for-unity` process is pinned to the token of whichever Editor spawned it, so a stale bridge from another worktree has to be replaced before your Editor can register. Ends with the Claude Code session pinned to the new Editor via `set_active_instance`, verified. Use when the user asks to start a Unity task / issue on its own worktree while another Unity is open, "spin up a second Unity for issue #N", "start work on <issue> without closing the other Unity", or "give me a fresh Unity Editor on branch X".
+description: Starts a new Unity task in an isolated git worktree AND spins up a second Unity Editor on it without touching any Editor already running on another worktree. Under stdio transport each Editor owns its own socket (6400, 6401, …) and registers itself, so a second Editor needs no bridge surgery. Ends with the Claude Code session pinned to the new Editor via `set_active_instance`, verified. Use when the user asks to start a Unity task / issue on its own worktree while another Unity is open, "spin up a second Unity for issue #N", "start work on <issue> without closing the other Unity", or "give me a fresh Unity Editor on branch X".
 allowed-tools: "Read Bash(git *) Bash(gh *) Bash(pwd) Bash(basename *) Bash(ls *) Bash(head *) Bash(cat *) Bash(pgrep *) Bash(ps *) Bash(kill *) Bash(lsof *) Bash(nohup *) Bash(disown *) Bash(mkdir *) Bash(awk *) Bash(sleep *) Glob"
 argument-hint: "<issue-number | short description>"
 disable-model-invocation: true
@@ -33,14 +33,9 @@ disable-model-invocation: true
 !`ps -eo pid,args | awk '/Unity\.app\/Contents\/MacOS\/Unity/ && /-projectPath/ && !/awk/' | head -5 || echo "no Editor currently open"`
 ```
 
-**Coplay MCP HTTP bridge on :8080 (Python `mcp-for-unity` — pinned to the token of whichever Editor spawned it):**
+**Unity Editors already publishing a stdio bridge (port + project each one owns):**
 ```
-!`lsof -nP -iTCP:8080 -sTCP:LISTEN 2>/dev/null | head -3 || echo "port 8080 free"`
-```
-
-**Coplay Python bridge process (what its `--unity-instance-token` and `--pidfile` reveal about who owns it):**
-```
-!`ps -eo pid,args | awk '/mcp-for-unity/ && !/awk/' | head -3 || echo "no bridge running"`
+!`cat ~/.unity-mcp/unity-mcp-status-*.json 2>/dev/null || echo "no Editor bridges registered yet"`
 ```
 
 **Installed Unity Editor versions:**
@@ -92,56 +87,31 @@ Two Editors of the same version can run in parallel on macOS as long as they poi
 
 Editor startup on a fresh `Library/` takes 2–10 minutes (asset import). Go async — never block a single Bash call on the full import. Move to Step 5.
 
-### Step 5 — handle the Coplay bridge concurrency quirk
+### Step 5 — nothing to do for the bridge
 
-This is the one that trips people up. Two things to know:
+Under stdio there is no shared bridge to contend for. Each Editor allocates its own
+socket (6400, then 6401, 6402… if those are taken), publishes
+`~/.unity-mcp/unity-mcp-status-<hash>.json` with its port and `project_path`, and is
+discovered independently. The MCP server is a child of *your Claude Code session*, not
+of any Editor, so nothing needs killing, restarting, or re-pinning.
 
-1. **The Python `mcp-for-unity` HTTP bridge accepts multiple Unity Editors as separate instances** — `mcpforunity://instances` returns a list, `set_active_instance` picks one.
-2. **BUT** when Coplay's Editor code auto-launches the bridge on startup, it spawns the Python process with `--unity-instance-token <that-editor's-token>` and `--pidfile <that-editor's-worktree>/Library/MCPForUnity/RunState/mcp_http_8080.pid`. That token pins the STARTER — a second Editor booting later can't register with a bridge that already exists on :8080 pinned to a different token.
-
-**Diagnostic:** `ps -eo pid,args | awk '/mcp-for-unity/ && !/awk/'` shows `--pidfile <some-worktree>/…` — that reveals which Editor started the current bridge.
-
-**Case A — port 8080 is free (no bridge running).** Nothing to do; your new Editor's Coplay code will auto-spawn a bridge on startup. Skip to Step 6.
-
-**Case B — port 8080 is held and its `--pidfile` points at YOUR new worktree.** Nothing to do — already yours (probably a stale pidfile from a prior run of the same Editor). Skip to Step 6.
-
-**Case C — port 8080 is held and its `--pidfile` points at ANOTHER worktree.** Kill JUST the Python process:
-
-```bash
-# Kill only the Python bridge, not any Unity Editor:
-pkill -f "mcp-for-unity --transport http" 2>/dev/null
-# Also kill its uv/uvx wrapper so it doesn't restart on the old token:
-pkill -f "uvx.*mcp-for-unity" 2>/dev/null
-sleep 2
-lsof -nP -iTCP:8080 -sTCP:LISTEN   # should be empty now
-```
-
-Then **restart YOUR new Editor** (kill only the Editor at your worktree path — the other worktree's Editor is untouched):
-
-```bash
-mine=$(pgrep -f "Unity\.app/Contents/MacOS/Unity -projectPath <worktree-path>")
-[ -n "$mine" ] && kill "$mine" && sleep 5
-nohup "$unity" -projectPath "<worktree-path>" > "<worktree-path>/test-results/editor.log" 2>&1 &
-disown
-```
-
-Your Editor's Coplay code will spawn a fresh Python bridge on :8080, this time tied to YOUR token. Once it's up, the OTHER worktree's Editor will also re-register with the same bridge as a separate instance — both end up visible in `mcpforunity://instances`. This IS the intended pattern; the two Editors coexist under one Python bridge.
+Both Editors simply show up in `mcpforunity://instances`. Go to Step 6.
 
 ### Step 6 — wait for YOUR instance to register
 
-Use `ReadMcpResourceTool` on `mcpforunity://instances` — do NOT poll `curl http://127.0.0.1:8080` (the bridge doesn't answer plain GET; the loop hangs to timeout).
+Use `ReadMcpResourceTool` on `mcpforunity://instances`. Poll until an instance whose
+`path` is under your worktree appears, and capture its full `id` (`Name@hash`). If both
+worktrees' Editors show up, that's expected — pick yours by path, not by name (two
+worktrees of the same repo can share a project name).
 
-Poll until an instance whose `name` matches your worktree's basename appears and capture its full `id` (`Name@hash`). If both worktrees' Editors show up, that's expected — pick yours.
+Don't poll in a Bash loop. Between checks use `ScheduleWakeup` (60–90s) — a cold
+`Library/` import can take 2–10 minutes.
 
-Fallback when `ReadMcpResourceTool` isn't in the toolset (rare): poll the on-disk pidfile:
+Fallback when `ReadMcpResourceTool` isn't in the toolset (rare): read the status files
+directly — they carry the same information the resource reports.
 
 ```bash
-pid_glob="<worktree-path>/Library/MCPForUnity/RunState/mcp_http_*.pid"
-end=$(( $(date +%s) + 600 ))
-while [ $(date +%s) -lt $end ]; do
-  ls $pid_glob >/dev/null 2>&1 && { echo READY; break; }
-  sleep 15
-done
+grep -l "<worktree-path>/Assets" ~/.unity-mcp/unity-mcp-status-*.json 2>/dev/null
 ```
 
 ### Step 7 — pin the session to your new instance
@@ -169,7 +139,7 @@ Short, factual:
 
 - Started task on branch `<branch>` at worktree `<worktree-path>`.
 - Launched Editor pid `<pid>` (Unity `<version>`). Other Editor(s) on `<other worktrees>` left running.
-- Bridge state: `<Case A/B/C>` — did you replace the Python bridge or not.
+- Bridge: Editor registered on port `<port>` (other Editors untouched).
 - Pinned MCP to `<Name@hash>`; verified with `Application.dataPath`.
 - Issue title + one-line goal (if there was an issue).
 - Offer to continue into the implementation loop with `/dev-loop`.
@@ -177,10 +147,10 @@ Short, factual:
 ## Guardrails / footguns
 
 - **Never kill any Unity Editor other than the one at your worktree path.** Match on `Unity.app/Contents/MacOS/Unity -projectPath <your-path>` — never `pkill Unity` or `killall Unity` (both hit Unity Hub, the license client, and any MPPM clones).
-- **Never kill a Python bridge whose `--pidfile` already points at your worktree** — that IS your bridge; killing it just re-triggers the same launch.
-- **Never poll `curl http://127.0.0.1:8080`** as a readiness check — the endpoint doesn't answer plain GET and the loop hangs to timeout. Use `mcpforunity://instances` via `ReadMcpResourceTool`, or the on-disk pidfile.
+- **Never kill the MCP server process.** Under stdio it is a child of your Claude Code session, shared across every Editor. Killing it takes the tools away for the rest of the session with no way to rebind — restarting Claude Code is the only recovery. Nothing about launching a second Editor requires touching it.
+- **Never poll for readiness in a Bash loop.** Use `ReadMcpResourceTool` on `mcpforunity://instances`, with `ScheduleWakeup` between attempts.
 - **Never trust `set_active_instance`'s success alone.** Actually invoke a tool and read `Application.dataPath`. In a multi-instance world, a wrong pin looks identical to a right one until you route a call.
 - **Never create the branch on top of the current branch's HEAD.** Always `git fetch origin <base>` and base off `origin/<base>`, otherwise the new task inherits unrelated in-progress work from wherever the current worktree is sitting.
-- **Never assume the second Editor will auto-recover** when the bridge is pinned to the wrong token. Case C requires killing the Python process AND restarting your Editor — the Editor's monitor doesn't retry the bridge launch on its own if it thought one was already up.
+- **Never assume a second Editor conflicts with the first.** It doesn't. If yours never appears in `mcpforunity://instances`, the cause is local to your Editor — still importing, or its Transport dropdown isn't on Stdio — not contention with the other one.
 - **Play mode reverts scene edits made via `mcp__UnityMCP__execute_code`.** If your task does scene authoring, do it in Edit mode and enter Play only to screenshot. Otherwise you'll rebuild the same hierarchy twice.
 - **Screenshots (`mcp__UnityMCP__manage_camera screenshot`) only capture fresh frames in Play mode.** In Edit mode, the Game view doesn't repaint on state changes — you'll get identical bytes on every call. Enter Play once the panel is authored.

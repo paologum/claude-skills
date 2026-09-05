@@ -48,9 +48,9 @@
       "why": "runs the specified PlayMode test class via the warm Editor when available (~2s startup) instead of batchmode's cold ~30s"
     },
     {
-      "pattern": "lsof[[:space:]]+.*:8080|claude[[:space:]]+mcp[[:space:]]+list.*(unity|coplay)",
+      "pattern": "lsof[[:space:]]+.*:640[0-9]|claude[[:space:]]+mcp[[:space:]]+list.*(unity|coplay)",
       "skill": "unity-mcp-setup",
-      "why": "already covers every diagnostic path for Coplay's Unity MCP (uv, pyenv shims, port 8080, stale stdio registration)"
+      "why": "already covers every diagnostic path for Unity MCP over stdio (uv/uvx, Coplay package, the Editor's 6400+ socket and status file, Claude Code registration)"
     },
     {
       "pattern": "pkill[[:space:]]+.*[Uu]nity|killall[[:space:]]+[Uu]nity",

@@ -17,7 +17,7 @@ A personal collection of [Claude Code](https://claude.com/claude-code) skills an
 | Skill | `/dev-loop` | Runs the enforced implementation loop: Explore → Plan → Implement small → Verify with a real check (tests/build/lint) → adversarial `/code-review` → iterate until green → commit → PR. Correctness must be proven, not asserted. |
 | Agent | `coder` | Executes a coding plan from a planner. Strictly follows the principles, refuses to expand scope or add abstractions the plan didn't ask for. Unity-aware: writes C# and Editor builder scripts for scene/UI changes; refuses to hand-edit `.unity` / `.prefab` YAML hierarchies. |
 | Agent | `researcher` | Performs disciplined web research with source-cited reporting. Prefers primary sources, tags every claim with `[Source]` / `[Inference]` / `[Conflict]` / `[Gap]`, and refuses to assert facts it cannot cite. |
-| Skill | `/unity-mcp-setup` | Diagnoses the Coplay Unity MCP setup (uv, Python via pyenv, Coplay package, Editor bridge on :8080, Claude Code registration) and walks the user through fixing anything missing. See "Unity MCP" section below. |
+| Skill | `/unity-mcp-setup` | Diagnoses the Coplay Unity MCP setup (uv, Coplay package, the Editor's stdio bridge socket, Claude Code registration) and walks the user through fixing anything missing. See "Unity MCP" section below. |
 | Skill | `/pr-screenshot` | Captures a Unity Play-mode screenshot via MCP and embeds it in the current PR's Demo section. Falls back to batchmode capture when MCP isn't available. |
 | Skill | `/pr-video` | Records a Unity Editor clip (Unity Recorder → H.264 MP4, no ffmpeg) and embeds it as an **inline playable video** in the current PR — uploads via `gh attach` (browser-session auth) to the `user-attachments` CDN, the only URL scheme GitHub renders as a real `<video>` element. Auto-falls back to a committed GIF (via `gifski`) if the MP4 exceeds 10 MB or upload fails. Verifies every step end-to-end. |
 | Skill | `/unity-smart-merge` | Configures git in the current Unity project to use `UnityYAMLMerge` for `.unity` / `.prefab` / `.asset` / `.mat` merges — writes `.gitattributes`, registers the driver in `.git/config`, adds a `git smerge` alias. |
@@ -52,15 +52,45 @@ To update later:
 
 When set up, Coplay's Unity MCP gives Claude live access to your open Unity Editor: create GameObjects in the scene, read the Editor console, run tests against the warm Editor (~2s instead of 30s cold batchmode), manage packages, execute menu items, enter/exit Play mode, and more.
 
-**We don't ship an `.mcp.json` in this plugin** — Coplay's current architecture uses an HTTP transport with a per-Editor auth token that only Coplay's Unity UI can generate correctly. A pre-baked `.mcp.json` pointing at the older `uvx coplay-mcp-server` stdio path advertises a broken connection. Instead, run `/unity-mcp-setup` to diagnose your current state and get walked through the setup.
+These skills assume the **stdio** transport. That choice matters, because it decides who
+owns the server process:
+
+- **Claude Code spawns the MCP server** as a child of the session. The Unity Editor is
+  just a TCP listener on port 6400 (6401, 6402… for additional Editors), publishing
+  `~/.unity-mcp/unity-mcp-status-<hash>.json` with its port and project path.
+- **Tools stay bound for the whole session, with or without Unity.** The server starts and
+  binds its tools even when no Editor is running; calls simply return
+  `"No Unity Editor instances found"` until one appears. Closing, restarting, or
+  reopening the Editor on another worktree is a non-event for MCP.
+- **No auth token, no shared bridge, no port contention.** Multiple Editors coexist as
+  separate instances; route between them with `set_active_instance` or a per-call
+  `unity_instance`.
+
+The stdio command line is identical for every project and every Editor, so the config is
+just a file you can check in. The canonical one ships here as
+[`templates/unity-mcp.mcp.json`](templates/unity-mcp.mcp.json).
 
 ### The short version
 
-1. **Client side (once per machine):** `brew install uv`. Ensure a Python 3.10+ interpreter is discoverable — if you use `pyenv`, run `pyenv global 3.11.9` (or newer) so the shim doesn't return an older Python.
-2. **Server side (once per Unity project):** In Unity, Window → Package Manager → `+` → Add package from git URL: `https://github.com/CoplayDev/unity-mcp.git?path=/MCPForUnity`.
-3. **Start the bridge:** Open the project in Unity, press **`Cmd+Shift+M`** — the MCP for Unity window opens, the HTTP server starts on `127.0.0.1:8080`.
-4. **Register Claude Code:** In that window's Clients section, click **Configure** next to Claude Code. It writes an HTTP-transport MCP entry into `~/.claude.json` with the correct auth token.
+1. **Once per machine:** `brew install uv`.
+2. **Once per Unity project:** In Unity, Window → Package Manager → `+` → Add package from git URL: `https://github.com/CoplayDev/unity-mcp.git?path=/MCPForUnity`.
+3. **Set the transport:** Open the project, press **`Cmd+Shift+M`**, set the **Transport** dropdown to **Stdio**.
+4. **Register Claude Code:** copy `templates/unity-mcp.mcp.json` to the Unity project's `.mcp.json`, or run:
+   ```
+   claude mcp add UnityMCP --scope user -- "$(which uvx)" --from mcpforunityserver mcp-for-unity --transport stdio
+   ```
+   The server must be named `UnityMCP` — the skills call `mcp__UnityMCP__*` by that name.
+   Use the absolute path to `uvx`: MCP servers are spawned from the client's environment,
+   which a GUI-launched client doesn't inherit from your shell profile.
 5. **Fresh session:** Exit any running Claude session and start `claude` in the Unity project directory (no `/resume`) — MCP tools only bind at session start.
+
+Run `/unity-mcp-setup` to diagnose any of the above.
+
+> **Why the plugin doesn't bundle the server itself.** A plugin-provided MCP server gets
+> plugin-scoped tool names (`mcp__plugin_claude_skills_UnityMCP__*`), which would break
+> every `mcp__UnityMCP__*` reference in these skills and in user projects that already
+> configure Unity MCP themselves. Shipping the config as a template keeps one tool
+> namespace for everyone.
 
 ### Using it once set up
 

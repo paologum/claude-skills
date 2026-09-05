@@ -1,0 +1,25 @@
+{
+  "_comment": [
+    "Canonical MCP for Unity (stdio) config. Copy to a Unity project's .mcp.json, or:",
+    "  claude mcp add UnityMCP --scope user -- uvx --from mcpforunityserver mcp-for-unity --transport stdio",
+    "The server MUST be named UnityMCP — the skills call mcp__UnityMCP__* by that name.",
+    "'command' assumes uvx is on the PATH the MCP client spawns with, which a GUI-launched",
+    "client often does not inherit from your shell profile. If the tools come up missing,",
+    "replace it with the absolute path from `which uvx` (e.g. /opt/homebrew/bin/uvx).",
+    "'--from mcpforunityserver' floats to the latest PyPI release; pin it",
+    "(mcpforunityserver==10.2.0) if you need two machines to resolve the same server."
+  ],
+  "mcpServers": {
+    "UnityMCP": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "mcpforunityserver",
+        "mcp-for-unity",
+        "--transport",
+        "stdio"
+      ]
+    }
+  }
+}

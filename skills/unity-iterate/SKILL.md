@@ -1,20 +1,20 @@
 ---
 name: unity-iterate
-description: The iteration loop for Unity work driven by Coplay MCP — what to do (and NOT do) when you're taking many small edits + rebuilds + screenshots in a single session. Covers the runtime footguns that keep re-biting mid-session (MCP session going orphan, force-push blocked by classifier, editor restart vs unity-mcp-setup, screenshot cadence for UI PRs, image URLs that render vs 404 on private repos, when a "just rebase" gets you superseded upstream). NOT the same as `/unity-mcp-setup` (that's first-time install) or `/unity-switch-worktree` (that's target-project changes). This is the tight-loop iteration playbook. Use when a Unity+MCP session is going many rounds — screenshot / edit / test / push / re-check — and mid-session you hit "the bridge died", "the classifier blocked my push", "the reviewer says X, do I trust it", or "I just rebased and there's a conflict on code that got superseded upstream".
+description: The iteration loop for Unity work driven by Coplay MCP — what to do (and NOT do) when you're taking many small edits + rebuilds + screenshots in a single session. Covers the runtime footguns that keep re-biting mid-session (routing to the wrong Editor, force-push blocked by classifier, screenshot cadence for UI PRs, image URLs that render vs 404 on private repos, when a "just rebase" gets you superseded upstream). NOT the same as `/unity-mcp-setup` (that's first-time install) or `/unity-switch-worktree` (that's target-project changes). This is the tight-loop iteration playbook. Use when a Unity+MCP session is going many rounds — screenshot / edit / test / push / re-check — and mid-session you hit "my calls are hitting the wrong project", "the classifier blocked my push", "the reviewer says X, do I trust it", or "I just rebased and there's a conflict on code that got superseded upstream".
 allowed-tools: "Read Bash(git *) Bash(gh *) Bash(pgrep *) Bash(kill *) Bash(lsof *) Bash(nohup *) Bash(disown *) Bash(mkdir *) Bash(osascript *) Bash(shasum *) Bash(diff *) Bash(ls *)"
 argument-hint: "(optional) which loop phase to focus on"
 ---
 
 ## Context
 
-**Which Unity Editor instance the MCP tools will hit:**
+**Unity Editors reachable over the stdio bridge (port + project each one owns):**
 ```
-!`curl -s http://127.0.0.1:8080/mcp -H "Content-Type: application/json" -H "Accept: application/json,text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"mcpforunity://instances"}}' 2>/dev/null | grep -oE '"name":[[:space:]]*"[^"]+"' | head -1 || echo "MCP HTTP endpoint not answering — either editor is down or session is orphaned"`
+!`cat ~/.unity-mcp/unity-mcp-status-*.json 2>/dev/null || echo "no Editor bridges registered"`
 ```
 
-**Currently-running Unity Editor + Coplay Python holding the bridge:**
+**Currently-running Unity Editor processes:**
 ```
-!`ps -eo pid,args | awk '/Unity\.app\/Contents\/MacOS\/Unity/ && /-projectPath/ && !/awk/' | head -3; lsof -nP -iTCP:8080 -sTCP:LISTEN 2>/dev/null | head -3`
+!`ps -eo pid,args | awk '/Unity\.app\/Contents\/MacOS\/Unity/ && /-projectPath/ && !/awk/' | head -3 || echo "no Editor running"`
 ```
 
 **Current branch + how far behind main it is (if in a git repo):**
@@ -28,83 +28,83 @@ You are inside a Unity iteration loop — many small cycles of edit → refresh 
 
 ---
 
-### Section 1 — MCP readiness: use the resource, never `curl`
+### Section 1 — MCP readiness: use the resource, never a shell poll
 
-The Coplay HTTP endpoint on `:8080` does **not** answer plain `GET /`. Any `curl http://127.0.0.1:8080` hangs until timeout. Any `Monitor` / `until` loop that curls the bridge hangs the same way. Don't do it.
+**The right check is one call:** `ReadMcpResourceTool` with `server: "UnityMCP"`,
+`uri: "mcpforunity://instances"`.
 
-**The right check is one call:** `ReadMcpResourceTool` with `server: "UnityMCP"`, `uri: "mcpforunity://instances"`.
+- `instance_count > 0` → an Editor is reachable. Call `mcp__UnityMCP__set_active_instance`
+  with the `Name@hash` id, then verify with `execute_code { return UnityEngine.Application.dataPath; }`.
+- `instance_count == 0` → the Editor isn't listening yet. **Don't loop in Bash.** Use
+  `ScheduleWakeup` (60–90s) and re-check on wake. A cold `Library/` import can take
+  minutes.
 
-- `instance_count > 0` → bridge is up. Call `mcp__UnityMCP__set_active_instance` with the `Name@hash` id, then verify with `execute_code { return UnityEngine.Application.dataPath; }`.
-- `instance_count == 0` → wait. **Not with curl.** Foreground `Bash sleep 20 && echo done` (allowed), then retry `ReadMcpResourceTool`. Up to ~3 retries. If the editor is genuinely cold-importing a fresh `Library/`, one `sleep 60` between retries.
-
-**The only time a pidfile poll is correct:** if `ReadMcpResourceTool` is not in this session's toolset at all (rare — deferred until after ToolSearch). Then use `until ls <target>/Library/MCPForUnity/RunState/mcp_http_*.pid; do sleep 15; done` — never `curl`.
-
-If you catch yourself typing `until curl ...` in a Bash whose subject is Unity, stop.
-
----
-
-### Section 2 — MCP session orphaned mid-session (NOT the same as unity-mcp-setup)
-
-Symptoms: `execute_code` returns `{"success": false, ..., "reason": "no_unity_session"}`, but Editor process is alive AND the Python on `:8080` is alive. Editor log has `MCP-FOR-UNITY: Server no longer running; ending orphaned session`.
-
-This is a **runtime** bind failure. First-time-setup (uv installed, pyenv Python 3.10+, Coplay package in manifest, Claude Code registered via HTTP) is all fine. **Don't invoke `/unity-mcp-setup`** — its diagnostic table will pass every check and you'll waste calls. It's a different problem.
-
-The fix:
+The fallback, if `ReadMcpResourceTool` isn't in this session's toolset (rare — deferred
+until after ToolSearch), is to read the status files the Editors publish:
 
 ```bash
-# Kill the stale Python that's holding :8080 but no longer connected to the editor.
-lsof -nP -iTCP:8080 -sTCP:LISTEN 2>/dev/null | awk 'NR==2 {print $2}' | xargs kill 2>/dev/null
-# Restart the Editor on the same worktree it was on.
-osascript -e 'tell application "Unity" to quit' 2>&1 || true
-sleep 5
-editor_pid=$(pgrep -f "Unity\.app/Contents/MacOS/Unity -projectPath" | head -1)
-[ -n "$editor_pid" ] && kill "$editor_pid"
-sleep 3
-nohup "/Applications/Unity/Hub/Editor/<version>/Unity.app/Contents/MacOS/Unity" \
-  -projectPath "<worktree>" > "<worktree>/test-results/editor.log" 2>&1 &
-disown
+cat ~/.unity-mcp/unity-mcp-status-*.json
 ```
 
-Then Section 1 for wait-for-bridge, then `set_active_instance`, then verify with `Application.dataPath`.
-
-This case has hit repeatedly in long sessions (5+ times in one). Recognize it fast so you don't burn tokens diagnosing setup.
+Each carries `unity_port`, `project_path`, `reloading` and `last_heartbeat` — everything
+the resource reports. A single `cat` or `lsof` is fine; an `until … done` loop around
+either is what's blocked, and rightly so.
 
 ---
 
-### Section 2b — MCP is bound to a different worktree's Editor (multi-Editor case)
+### Section 2 — the MCP server outlives Unity; stop treating restarts as MCP events
 
-Symptoms: `ReadMcpResourceTool mcpforunity://instances` shows one instance whose `name` is a DIFFERENT worktree, not yours. Your Editor is running (`pgrep` shows it at your worktree path) but doesn't appear in the instance list, so every MCP call routes to the wrong project — or `set_active_instance <yours>` fails with "Instance hash does not match any running Unity editors."
+Under stdio the server is a child of **your Claude Code session**, not of any Editor.
+It binds its tools at session start and keeps them for the whole session, whether or not
+Unity is running. Closing the Editor, restarting it, letting it domain-reload, or
+switching it to another worktree does not disturb the MCP connection at all.
 
-Why: Coplay's Editor plugin only tries to spawn / register with the Python bridge at Editor **init**. The Python process is pinned to whichever Editor spawned it — a second Editor booting later can't register with an already-owned bridge on its own. See `unity-start-task` Case C for the full explanation; this section is the mid-session variant.
+So when a call fails, read the failure literally:
 
-The fix is `unity-start-task`'s Case C shape, but scoped to your one worktree without creating a new one:
+- **`"No Unity Editor instances found"`** → no Editor is listening. It's importing,
+  closed, or its Transport dropdown isn't on Stdio. Wait, or open it. Don't restart
+  Claude Code, don't kill anything.
+- **`"Unity is reloading; please retry"`** → a domain reload is in flight. Retry; the
+  server already backs off and reconnects on its own.
+- **Calls land on the wrong project** → Section 2b.
+- **`mcp__UnityMCP__*` tools missing entirely** → this is the one failure stdio can't
+  recover from mid-session: the server never spawned (usually `uvx` unresolvable in the
+  launch environment). Nothing you do in-session brings the tools back. Report it, and
+  point at `/unity-mcp-setup`.
 
-```bash
-# 1. Kill just the Python bridge — leaves every Editor process running.
-pkill -f "mcp-for-unity --transport http" 2>/dev/null
-pkill -f "uvx.*mcp-for-unity" 2>/dev/null
-sleep 2
-lsof -nP -iTCP:8080 -sTCP:LISTEN   # must be empty
-
-# 2. Kill only YOUR Editor — match on your worktree path. NEVER `pkill Unity`.
-mine=$(pgrep -f "Unity\.app/Contents/MacOS/Unity -projectPath <your-worktree>")
-[ -n "$mine" ] && kill "$mine" && sleep 5
-
-# 3. Relaunch YOUR Editor. Its Coplay code spawns a fresh Python bridge pinned to YOUR token.
-nohup "/Applications/Unity/Hub/Editor/<version>/Unity.app/Contents/MacOS/Unity" \
-  -projectPath "<your-worktree>" > "<your-worktree>/test-results/editor.log" 2>&1 &
-disown
-```
-
-Then wait for `mcpforunity://instances` to show BOTH yours AND the other Editors (this is the pattern — after step 3, the untouched Editors' Coplay plugins auto-re-register with the new bridge as separate instances). Pin: `set_active_instance <your-Name@hash>`. Verify: `execute_code { return UnityEngine.Application.dataPath; }` — must end in `<your-worktree>/Assets`.
-
-**Don't:**
-- Kill any Editor other than the one at your worktree path.
-- Try to change the port via EditorPref (`MCPForUnity.HttpUrl`) — it's Unity-installation-wide, so all Editors of one Unity version read the same value. Per-editor port config only works for STDIO transport, not the HTTP one Claude Code uses.
-- Add a second `unity-8081` MCP registration to `~/.claude.json` to route in parallel — the new tools don't appear in a session that was launched before the addition (MCP tools bind at session start). Only helps future sessions.
-- Wait for Coplay to auto-recover on its own — it does not retry the launch. The kill+restart above is what actually recovers.
+**Never kill the MCP server process to "reset" it.** There's no mechanism to respawn it
+mid-session; you'd be trading a recoverable problem for an unrecoverable one.
 
 ---
+
+### Section 2b — calls are routing to a different worktree's Editor
+
+Symptoms: `mcpforunity://instances` lists more than one Editor and your calls hit the
+wrong one, or `execute_code { return UnityEngine.Application.dataPath; }` returns another
+worktree's path, or a call errors with `instance_selection_required`.
+
+This is routing, not breakage. Multiple Editors coexisting is the normal state — each
+has its own socket (6400, 6401, …) and its own entry.
+
+```
+mcp__UnityMCP__set_active_instance instance="<Name@hash>"
+```
+
+Then **verify by routing a real call**, not by trusting the return value:
+
+```csharp
+// via mcp__UnityMCP__execute_code
+return UnityEngine.Application.dataPath;
+```
+
+Must end in `<your-worktree>/Assets`. Match instances by `path`, not `name` — two
+worktrees of the same repo report the same project name.
+
+For one-off calls against another Editor without moving the session pin, pass
+`unity_instance="6401"` (its port) or `unity_instance="<hash-prefix>"` on that call.
+
+**Don't:** kill Editors, kill the server, or restart Claude Code for this. Under HTTP a
+wrong-instance bind meant bridge surgery; under stdio it's one `set_active_instance`.
 
 ### Section 3 — Screenshot cadence for UI PRs
 
