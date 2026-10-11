@@ -18,7 +18,7 @@ Do not end the turn until one of these holds, and say which:
 1. The PR is open (ready for review, or draft if `--draft-only`), every acceptance criterion has evidence in the PR, the self-review findings are resolved, and reviewers are requested.
 2. Blocked on a decision only the user can make. Ask it as one concrete question with your recommended answer — then keep working on everything that doesn't depend on it.
 
-Transient tool failures (MCP reconnecting, Editor importing, a flaky network call) are not blockers: wait and retry.
+Transient tool failures (MCP reconnecting, Editor importing, Safe Mode, a flaky network call) are not blockers. Handle them and keep going. Waiting for Unity is never a reason to end the turn or ask the user whether it's up: `/unity-editor-up`'s background wait wakes the session when there's something to act on. Don't end a turn on a `ScheduleWakeup` timer to wait for an import.
 
 ## Step 1 — understand the issue
 
@@ -30,7 +30,7 @@ Transient tool failures (MCP reconnecting, Editor importing, a flaky network cal
 
 - Base = the default branch, or the head branch of `--stack-on <PR>`. `git fetch origin <base>`.
 - If the session is already in a worktree on a fresh branch for this work, use it. Otherwise create one: branch `<issue-number>-<kebab-slug>` (≤ 6 words), worktree as a sibling of the repo root or via the session's worktree tool, based on `origin/<base>`. Never build on an unrelated branch's HEAD.
-- Unity: make sure the MCP routes to **this** worktree's Editor (`/unity-switch-worktree`, or `set_active_instance` + verify `Application.dataPath`) before any Editor work.
+- Unity: **start this worktree's Editor now**, right after creating the worktree and before reading code or implementing, with `/unity-editor-up`. Its wait runs in the background, so the first import (minutes on a fresh `Library/`) overlaps steps 1–3 instead of blocking step 4. When it reports `COMPILE_ERRORS` or Safe Mode, follow that skill's recovery. If the base branch itself is broken, that skill says how to find or land the fix. Route MCP only to **this** worktree's instance (`set_active_instance` + verify `Application.dataPath`). Never close or switch another session's Editor.
 
 ## Step 3 — implement
 

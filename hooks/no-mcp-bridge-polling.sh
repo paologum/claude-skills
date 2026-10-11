@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # PreToolUse Bash hook — deny shell polling loops for the Unity MCP bridge.
 # Rationale: waiting for a Unity Editor to register on the stdio bridge should use
-# ScheduleWakeup, not a `until lsof/cat/pgrep; do sleep; done` loop in Bash.
+# the unity-editor-up skill's background wait script (one exit, catches Safe Mode),
+# not an ad-hoc `until lsof/cat/pgrep; do sleep; done` loop in Bash.
 # See memory feedback_no_bash_polls_for_mcp.
 #
 # Fires only on the loop pattern; lone `lsof`, `cat`, `pgrep` calls are fine.
@@ -24,7 +25,7 @@ fi
 # stdio-era signals: the Editor's socket (6400+) and the status files it publishes.
 if printf '%s' "$cmd" | grep -qiE '(until|while).*(lsof.*(640[0-9]|8080)|curl.*(127\.0\.0\.1|localhost):(6[45]0[0-9]|8080)|unity-mcp-status|mcp-for-unity|Library/MCPForUnity/RunState)'; then
   cat <<'JSON'
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Polling loops for the Unity MCP bridge are blocked. Use ScheduleWakeup(60-90s) with a self-contained resume prompt instead — the harness will re-invoke you when the wakeup fires, and you can call ReadMcpResourceTool on mcpforunity://instances directly at that point. See memory feedback_no_bash_polls_for_mcp."}}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Polling loops for the Unity MCP bridge are blocked. Use the /unity-editor-up skill instead: run its unity_editor_up.py with run_in_background so the harness wakes you when the Editor is READY, has COMPILE_ERRORS (Safe Mode), EXITED or TIMEOUT. For a single check, call ReadMcpResourceTool on mcpforunity://instances. See memory feedback_no_bash_polls_for_mcp."}}
 JSON
 fi
 

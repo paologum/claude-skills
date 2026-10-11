@@ -62,6 +62,11 @@
 
   "user_prompt": [
     {
+      "pattern": "(?i)safe mode|(unity|editor).{0,30}(is up|it'?s up|importing|not showing|isn'?t showing|not registered|compile errors?)|(wait|waiting) (for|on) (unity|the editor)",
+      "skill": "unity-editor-up",
+      "why": "launches this worktree's Editor, waits in the background (wakes the session on READY / COMPILE_ERRORS / EXITED), and recovers from Safe Mode, so the user never has to say it's up"
+    },
+    {
       "pattern": "(?i)(address|fix|handle|resolve|respond to|reply to|acknowledge).{0,30}(review comments|review feedback|requested changes|(his|her|their|[a-z]+'s|the|new|latest|reviewer'?s?) (comments|nits|feedback|findings)|([a-z]+'s|latest|new) review|nits)|(he|she|they|reviewer) (has|have|left|posted) (new |more |some |another )?(comments|nits|a review|changes)|(has|have|left|posted) (a |new |more |some |another )?(comments|nits|review|reply).{0,40}(pull/|[^a-z]pr([^a-z]|$)|#[0-9]+|address|merge)|requested changes|approved.{0,60}(nits|merge)",
       "skill": "address-review",
       "why": "one call does the whole review round: triage every point, fix in a new commit or file an issue, merge base + resolve conflicts, run tests locally, push, post a point-by-point reply, re-request reviewers (and merge with --merge once approved)"

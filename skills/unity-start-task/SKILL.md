@@ -75,17 +75,17 @@ unity="/Applications/Unity/Hub/Editor/${version}/Unity.app/Contents/MacOS/Unity"
 
 If the binary isn't installed, stop and tell the user to install it via Unity Hub. Do NOT substitute a different version — Guandan pins one and MPPM / package versions depend on it.
 
-### Step 4 — launch the new Editor detached (concurrent with any existing)
+### Step 4 — launch the new Editor and wait for it in the background
+
+Launch **and** wait in one background call through `/unity-editor-up`'s script. Its path is the `unity-editor-up` skill's base directory plus `/unity_editor_up.py`, i.e. the sibling `skills/unity-editor-up/` of this skill's base directory. Run it with Bash `run_in_background: true`:
 
 ```bash
-mkdir -p "<worktree-path>/test-results"
-nohup "$unity" -projectPath "<worktree-path>" > "<worktree-path>/test-results/editor.log" 2>&1 &
-disown
+python3 <plugin>/skills/unity-editor-up/unity_editor_up.py --project "<worktree-path>" --launch
 ```
 
-Two Editors of the same version can run in parallel on macOS as long as they point at different project paths. This is by design — do not kill any other running Editor.
+It starts the Editor with its own `-logFile`, so compile errors are visible. It ignores other worktrees' Editors and exits once with `READY <Name@hash>`, `COMPILE_ERRORS` (Safe Mode), `EXITED` or `TIMEOUT`, and the harness wakes the session then. Keep working while it runs. Don't `nohup` Unity yourself, don't poll, and don't end the turn on a timer. For `COMPILE_ERRORS`, follow `/unity-editor-up` Step 2 (fix, then `--restart`).
 
-Editor startup on a fresh `Library/` takes 2–10 minutes (asset import). Go async — never block a single Bash call on the full import. Move to Step 5.
+Two Editors of the same version run in parallel fine as long as they point at different project paths. Never kill another worktree's Editor.
 
 ### Step 5 — nothing to do for the bridge
 
@@ -97,22 +97,9 @@ of any Editor, so nothing needs killing, restarting, or re-pinning.
 
 Both Editors simply show up in `mcpforunity://instances`. Go to Step 6.
 
-### Step 6 — wait for YOUR instance to register
+### Step 6 — take YOUR instance id from the wait result
 
-Use `ReadMcpResourceTool` on `mcpforunity://instances`. Poll until an instance whose
-`path` is under your worktree appears, and capture its full `id` (`Name@hash`). If both
-worktrees' Editors show up, that's expected — pick yours by path, not by name (two
-worktrees of the same repo can share a project name).
-
-Don't poll in a Bash loop. Between checks use `ScheduleWakeup` (60–90s) — a cold
-`Library/` import can take 2–10 minutes.
-
-Fallback when `ReadMcpResourceTool` isn't in the toolset (rare): read the status files
-directly — they carry the same information the resource reports.
-
-```bash
-grep -l "<worktree-path>/Assets" ~/.unity-mcp/unity-mcp-status-*.json 2>/dev/null
-```
+When the background wait from Step 4 reports `READY <Name@hash>`, that `Name@hash` is your instance. Pick it by path, not name: two worktrees of the same repo can share a project name. To double-check, read `mcpforunity://instances` once with `ReadMcpResourceTool` and match `path` to your worktree.
 
 ### Step 7 — pin the session to your new instance
 
@@ -148,7 +135,7 @@ Short, factual:
 
 - **Never kill any Unity Editor other than the one at your worktree path.** Match on `Unity.app/Contents/MacOS/Unity -projectPath <your-path>` — never `pkill Unity` or `killall Unity` (both hit Unity Hub, the license client, and any MPPM clones).
 - **Never kill the MCP server process.** Under stdio it is a child of your Claude Code session, shared across every Editor. Killing it takes the tools away for the rest of the session with no way to rebind — restarting Claude Code is the only recovery. Nothing about launching a second Editor requires touching it.
-- **Never poll for readiness in a Bash loop.** Use `ReadMcpResourceTool` on `mcpforunity://instances`, with `ScheduleWakeup` between attempts.
+- **Never poll for readiness in a Bash loop.** Use `ReadMcpResourceTool` on `mcpforunity://instances`, or `/unity-editor-up`'s background wait between attempts — never `ScheduleWakeup`.
 - **Never trust `set_active_instance`'s success alone.** Actually invoke a tool and read `Application.dataPath`. In a multi-instance world, a wrong pin looks identical to a right one until you route a call.
 - **Never create the branch on top of the current branch's HEAD.** Always `git fetch origin <base>` and base off `origin/<base>`, otherwise the new task inherits unrelated in-progress work from wherever the current worktree is sitting.
 - **Never assume a second Editor conflicts with the first.** It doesn't. If yours never appears in `mcpforunity://instances`, the cause is local to your Editor — still importing, or its Transport dropdown isn't on Stdio — not contention with the other one.

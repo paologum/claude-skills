@@ -77,7 +77,7 @@ For nits on an approved PR, default to **Fix** — they're cheap and the user us
 
 - Make the fixes. Match surrounding style; keep the diff to the review's scope.
 - Run the project's real checks **locally** — never push-and-wait on CI:
-  - Unity: `/run-playmode` / `mcp__UnityMCP__run_tests` against the warm Editor, else `/unity-test` batchmode. Run the classes the change touches, then the full EditMode suite.
+  - Unity: `/run-playmode` / `mcp__UnityMCP__run_tests` against the warm Editor, else `/unity-test` batchmode. If this worktree has no Editor registered yet, bring one up with `/unity-editor-up` (background wait, Safe Mode recovery) rather than waiting on a timer. Run the classes the change touches, then the full EditMode suite.
   - Other stacks: the test/lint/build commands the repo defines.
 - A test that fails identically on the base branch is pre-existing: note it, don't block on it.
 - If a fix changes UI, re-capture the affected screens (`/pr-screenshot` or `/unity-e2e-verify`) — stale screenshots in a PR are worse than none.
