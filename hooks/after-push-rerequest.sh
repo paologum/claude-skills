@@ -17,10 +17,20 @@ cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty' 2>/dev/null
 printf '%s' "$cmd" | grep -Eq '(^|[;&|(])[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+push([[:space:]]|$)' || exit 0
 printf '%s' "$cmd" | grep -Eq -- 'push[^;&|]*[[:space:]](--dry-run|-n)([[:space:]]|$)' && exit 0
 
-out="$(printf '%s' "$payload" | jq -r '.tool_response | if type == "object" then ((.stdout // "") + "\n" + (.stderr // "")) else tostring end' 2>/dev/null)"
-# Failed or no-op pushes aren't a new round. Line-anchored so branch names and
-# unrelated output in a compound command don't suppress a real push.
-printf '%s\n' "$out" | grep -Eq '^[[:space:]]*! \[(rejected|remote rejected)\]|^error: failed to push|^fatal:|^Everything up-to-date' && exit 0
+out="$(printf '%s' "$payload" | jq -r '.tool_response | if type == "object" then ((.stderr // "") + "\n" + (.stdout // "")) else tostring end' 2>/dev/null)"
+# Trust git's own report: the ref lines under "To <remote>". A successful update
+# looks like "   a..b  src -> dst" / " * [new branch]  src -> dst" / " + a...b  src -> dst";
+# rejected (" ! "), up-to-date and failed pushes have none, so they stay silent.
+# Reading only this block keeps `->` / `fatal:` from earlier commands out of it.
+branch="$(printf '%s\n' "$out" | awk '
+  /^To / { inblock = 1; next }
+  inblock && /^[[:space:]]/ {
+    if ($0 ~ /^[[:space:]]*!/) next
+    if (match($0, / -> [^[:space:]]+/)) { print substr($0, RSTART + 4, RLENGTH - 4); exit }
+    next
+  }
+  { inblock = 0 }')"
+[ -n "$branch" ] || exit 0
 
 # macOS ships no `timeout`; fall back to running unbounded rather than never running.
 t() { if command -v timeout >/dev/null 2>&1; then timeout "$@"; elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$@"; else shift; "$@"; fi; }
@@ -33,10 +43,7 @@ dir="$(printf '%s' "$cmd" | sed -nE 's/.*git[[:space:]]+-C[[:space:]]+([^[:space
 dir="${dir//\"/}"; dir="${dir//\'/}"; dir="${dir/#\~/$HOME}"
 [ -n "$dir" ] && cd "$dir" 2>/dev/null
 
-# The pushed branch, from git's "<src> -> <dst>" line; else the checked-out branch.
-branch="$(printf '%s\n' "$out" | grep -v '^remote:' | sed -nE 's/.*[[:space:]]->[[:space:]]+([^[:space:]]+).*/\1/p' | head -1)"
-
-pr_json="$(t 10 gh pr view ${branch:+"$branch"} --json number,state,reviews,reviewRequests 2>/dev/null)" || exit 0
+pr_json="$(t 10 gh pr view "$branch" --json number,state,reviews,reviewRequests 2>/dev/null)" || exit 0
 [ "$(printf '%s' "$pr_json" | jq -r '.state')" = "OPEN" ] || exit 0
 
 me="$(t 5 gh api user --jq .login 2>/dev/null)"
