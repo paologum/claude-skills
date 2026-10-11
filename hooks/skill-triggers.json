@@ -62,6 +62,16 @@
 
   "user_prompt": [
     {
+      "pattern": "(?i)(address|fix|handle|resolve|respond to|reply to|acknowledge).{0,30}(review comments|review feedback|requested changes|(his|her|their|[a-z]+'s|the|new|latest|reviewer'?s?) (comments|nits|feedback|findings)|([a-z]+'s|latest|new) review|nits)|(he|she|they|reviewer) (has|have|left|posted) (new |more |some |another )?(comments|nits|a review|changes)|(has|have|left|posted) (a |new |more |some |another )?(comments|nits|review|reply).{0,40}(pull/|[^a-z]pr([^a-z]|$)|#[0-9]+|address|merge)|requested changes|approved.{0,60}(nits|merge)",
+      "skill": "address-review",
+      "why": "one call does the whole review round: triage every point, fix in a new commit or file an issue, merge base + resolve conflicts, run tests locally, push, post a point-by-point reply, re-request reviewers (and merge with --merge once approved)"
+    },
+    {
+      "pattern": "(?i)(create|open|give me|make|want|put up|start).{0,15}(a |the )?draft pr|pr with (screenshots|videos?|gifs?)|(work on|start (work )?on|let'?s do).{0,25}(issue|#[0-9]+|issues/[0-9]+)",
+      "skill": "ship-issue",
+      "why": "the standing definition of done for an issue — worktree, implementation, local tests, screenshots at every resolution + video, readable PR body, adversarial self-review, open + request reviewers — without restating it in a /goal"
+    },
+    {
       "pattern": "(?i)(write|draft|create|open).{0,20}(pull request|\\bpr\\b)",
       "skill": "pr-description",
       "why": "drafts the PR body — trigger this before hand-writing a description"
