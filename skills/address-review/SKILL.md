@@ -9,7 +9,7 @@ argument-hint: "<PR-url-or-number> [--merge] [--no-rerequest]"
 
 One call replaces the loop the user otherwise types by hand every round: *"address the comments with a new commit and comment, merge main, run tests locally, push, re-request review (and merge if approved)."*
 
-Invoking this skill **is** the user's authorization to commit and push to the PR's branch and to post the reply comment. It is **not** authorization to force-push, rewrite history, close the PR, or (without `--merge`) merge it.
+**Authorization.** When the user typed `/address-review`, or their message asks for the feedback to be addressed/fixed/pushed, that is authorization to commit and push to the PR's branch, post the reply comment, and re-request review. If you reached this skill on your own (e.g. a hook suggested it) and the user only *asked about* a review, do steps 1–3 and report the triage — don't commit, push, or post until they say go. Nothing here authorizes force-pushing, rewriting history, closing the PR, or merging without `--merge` (or an explicit "merge it").
 
 ## Exit condition
 
@@ -26,6 +26,7 @@ Do not end the turn until one of these is true, and say which:
 - `gh pr view <N> --json number,title,url,headRefName,baseRefName,headRefOid,isDraft,state,mergeable,reviewDecision,author`
 - If `state` isn't `OPEN`, stop and say so.
 - Find a checkout of `headRefName`: `git worktree list --porcelain`. Reuse it if it exists **and is clean**; otherwise create one off the remote branch (`git fetch origin <head> && git worktree add <sibling-path> <head>`). Never switch the user's current checkout to another branch, and never discard uncommitted work you find there.
+- **Sync it with the remote PR branch** before touching anything — reviewers apply suggestions and "Update branch" from the web UI: `git fetch origin <head> && git merge --ff-only origin/<head>`. If that fails because the local branch has unpushed commits, merge `origin/<head>` normally; if it's genuinely diverged in a way you don't understand, stop and report rather than risk a force-push.
 
 ## Step 2 — collect what's new
 
@@ -42,7 +43,8 @@ query($owner:String!,$repo:String!,$n:Int!){repository(owner:$owner,name:$repo){
 ```
 
 - **Me** = `gh api user --jq .login`.
-- **Cutoff** = the later of my last comment on the PR and the last commit's date. Everything from other people after the cutoff is new. Also re-read the most recent `CHANGES_REQUESTED` review even if it's older: its points must be re-checked against the current head.
+- **Cutoff** = the `createdAt` of my last reply comment from a previous review round (one that starts `Addressed review`, or otherwise maps review points to fixes). Everything from other people after it is new. If there is no such comment, **everything** is in scope. Don't use commit dates — a commit made before a review can be pushed after it, and an unrelated push doesn't answer a review.
+- Always re-read the most recent `CHANGES_REQUESTED` review, even if it predates the cutoff: its points must be re-checked against the current head.
 - Unresolved review threads count regardless of date.
 - Bot reviewers (`[bot]` logins, review workflows) count as reviewers, but see "Disagreeing" below.
 
@@ -104,7 +106,11 @@ Merged `<base>` (resolved conflicts in `<files>`).
 Local verification: <suite> <passed>/<total>[; pre-existing failure: <name>, fails on <base> too].
 ```
 
-- For line threads you fixed, also reply in-thread with the commit SHA and resolve the thread (`resolveReviewThread` mutation with the thread `id`).
+- For line threads you fixed, also reply in-thread with the commit SHA and resolve the thread, using the thread `id` from step 2:
+  ```bash
+  gh api graphql -f query='mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{url}}}' -F t=<thread-id> -F b='Fixed in abc1234.'
+  gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=<thread-id>
+  ```
 - **Re-request review** (unless `--no-rerequest`): every non-self, non-bot user who submitted a review on this PR; if nobody has, the CODEOWNERS owners for the changed paths minus yourself. `gh pr edit <N> --add-reviewer <login>[,<login>]` — this re-requests even after a prior review.
 - If the PR is a draft and the user's request implies it's ready ("publish", "open it", "request review"), `gh pr ready <N>` first.
 
@@ -113,8 +119,10 @@ Local verification: <suite> <passed>/<total>[; pre-existing failure: <name>, fai
 Merge only when **all** hold — otherwise report which one failed and stop:
 
 - `reviewDecision == APPROVED` (re-query after pushing; a new commit can dismiss stale approvals if the repo requires it).
-- `mergeable == MERGEABLE` after your push.
+- `mergeable == MERGEABLE` after your push. GitHub reports `UNKNOWN` for a few seconds while it recomputes — re-query (up to ~5 times, a few seconds apart) before treating it as a failure.
 - Local verification in step 5 passed.
+
+If the base branch requires status checks, don't wait on them and never bypass them: use `gh pr merge --auto` (merges when checks pass) and report that, or stop if auto-merge is disabled. **Never `--admin`.**
 
 Merge method: the repo's allowed method from `gh repo view --json squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed`, preferring squash, then merge commit. `gh pr merge <N> --squash --delete-branch` (drop `--delete-branch` if a worktree still has the branch checked out; remove the worktree first only if it's clean and yours).
 
@@ -124,7 +132,7 @@ End with: the PR link, the point → resolution table (same as the comment), com
 
 ## Guardrails
 
-- Never force-push, amend pushed commits, or rewrite the PR description's author-written sections without being asked.
+- Never force-push, `--admin`-merge, amend pushed commits, or rewrite the PR description's author-written sections without being asked.
 - Never mark a point fixed without a passing local check that would catch its regression.
 - Never reply defensively to an AI reviewer that's wrong — record "Not changed: <evidence>" and move on; if the user has asked to be consulted on wrong AI findings, stop and report instead.
 - Never write operator identifiers (IPs, hostnames, personal paths) into commits or comments.
