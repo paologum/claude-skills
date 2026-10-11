@@ -104,8 +104,8 @@ Use `ReadMcpResourceTool` on `mcpforunity://instances`. Poll until an instance w
 worktrees' Editors show up, that's expected — pick yours by path, not by name (two
 worktrees of the same repo can share a project name).
 
-Don't poll in a Bash loop. Between checks use `ScheduleWakeup` (60–90s) — a cold
-`Library/` import can take 2–10 minutes.
+Don't poll in a Bash loop or guess with `ScheduleWakeup` — a cold `Library/` import can take
+2–10 minutes, and a timer can't tell an import from Safe Mode. run `/unity-editor-up` instead: its wait script runs in the background and wakes the session the moment the Editor registers, hits compile errors / Safe Mode, or exits. Never end the turn on a timer to wait for an import.
 
 Fallback when `ReadMcpResourceTool` isn't in the toolset (rare): read the status files
 directly — they carry the same information the resource reports.
@@ -148,7 +148,7 @@ Short, factual:
 
 - **Never kill any Unity Editor other than the one at your worktree path.** Match on `Unity.app/Contents/MacOS/Unity -projectPath <your-path>` — never `pkill Unity` or `killall Unity` (both hit Unity Hub, the license client, and any MPPM clones).
 - **Never kill the MCP server process.** Under stdio it is a child of your Claude Code session, shared across every Editor. Killing it takes the tools away for the rest of the session with no way to rebind — restarting Claude Code is the only recovery. Nothing about launching a second Editor requires touching it.
-- **Never poll for readiness in a Bash loop.** Use `ReadMcpResourceTool` on `mcpforunity://instances`, with `ScheduleWakeup` between attempts.
+- **Never poll for readiness in a Bash loop.** Use `ReadMcpResourceTool` on `mcpforunity://instances`, or `/unity-editor-up`'s background wait between attempts — never `ScheduleWakeup`.
 - **Never trust `set_active_instance`'s success alone.** Actually invoke a tool and read `Application.dataPath`. In a multi-instance world, a wrong pin looks identical to a right one until you route a call.
 - **Never create the branch on top of the current branch's HEAD.** Always `git fetch origin <base>` and base off `origin/<base>`, otherwise the new task inherits unrelated in-progress work from wherever the current worktree is sitting.
 - **Never assume a second Editor conflicts with the first.** It doesn't. If yours never appears in `mcpforunity://instances`, the cause is local to your Editor — still importing, or its Transport dropdown isn't on Stdio — not contention with the other one.

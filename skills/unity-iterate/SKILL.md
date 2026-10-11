@@ -35,9 +35,8 @@ You are inside a Unity iteration loop — many small cycles of edit → refresh 
 
 - `instance_count > 0` → an Editor is reachable. Call `mcp__UnityMCP__set_active_instance`
   with the `Name@hash` id, then verify with `execute_code { return UnityEngine.Application.dataPath; }`.
-- `instance_count == 0` → the Editor isn't listening yet. **Don't loop in Bash.** Use
-  `ScheduleWakeup` (60–90s) and re-check on wake. A cold `Library/` import can take
-  minutes.
+- `instance_count == 0` → the Editor isn't listening yet. **Don't loop in Bash.** If this worktree's
+  Editor isn't running or is still importing, run `/unity-editor-up` instead: its wait script runs in the background and wakes the session the moment the Editor registers, hits compile errors / Safe Mode, or exits. Never end the turn on a timer to wait for an import.
 
 The fallback, if `ReadMcpResourceTool` isn't in this session's toolset (rare — deferred
 until after ToolSearch), is to read the status files the Editors publish:

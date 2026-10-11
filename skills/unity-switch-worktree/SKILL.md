@@ -108,7 +108,7 @@ grep -l "<target>/Assets" ~/.unity-mcp/unity-mcp-status-*.json
 ```
 
 Either way, **don't wrap it in a shell polling loop.** Unity import can take 2-10 minutes;
-use `ScheduleWakeup` (60-90s) between checks so the session isn't blocked.
+Run `/unity-editor-up` instead: its wait script runs in the background and wakes the session the moment the Editor registers, hits compile errors / Safe Mode, or exits. Never end the turn on a timer to wait for an import.
 
 If the Editor process died before the bridge came up, check `<target>/test-results/editor.log` for compile errors or license failures before retrying.
 
@@ -146,7 +146,7 @@ If the user asked to switch as a step toward another workflow (screenshots, Play
 ## Don'ts
 
 - Don't `pkill Unity` or `killall Unity`. Kill the specific Editor process by matching on `Unity.app/Contents/MacOS/Unity -projectPath`.
-- Don't check readiness with a shell polling loop. Use `mcpforunity://instances` (or a single `cat` of the status files) with `ScheduleWakeup` between attempts.
+- Don't check readiness with a shell polling loop. Use `mcpforunity://instances` (or a single `cat` of the status files) or `/unity-editor-up`'s background wait — never a `ScheduleWakeup` timer.
 - Don't kill the MCP server to "reconnect it" after the switch. It never disconnected — it is a child of your Claude Code session and survives Editor restarts. Killing it removes the Unity tools for the rest of the session with no way to rebind.
 - Don't skip Step 6. `set_active_instance` returning success only means the server accepted the request — it doesn't confirm the tool calls will route to the new project. A stale session shows up as "code executes but returns dataPath from the old worktree."
 - Don't attempt to switch while the current Editor has unsaved changes without warning the user. There is no undo.
