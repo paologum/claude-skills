@@ -29,7 +29,8 @@ python3 <skill-base-dir>/unity_editor_up.py --project "$(git rev-parse --show-to
 
 The script:
 - reuses this worktree's Editor if one is already running, or launches one with its log at `Logs/claude-editor.log`
-- exits with one final line: `READY`, `READY_WITH_ERRORS`, `COMPILE_ERRORS`, `EXITED` or `TIMEOUT`
+- exits with one final line: `READY`, `COMPILE_ERRORS`, `EXITED`, `TIMEOUT` or `ERROR`
+- `READY` means this worktree's bridge heartbeat is live, so stale status files from old sessions can't fool it
 
 The harness re-invokes the session when it exits, so keep working until then. Don't call `ScheduleWakeup`, don't poll in a loop, and don't end the turn just to wait.
 
@@ -39,10 +40,9 @@ Other worktrees' Editors belong to other sessions. Never close, kill or "switch"
 
 | Final line | Do |
 |---|---|
-| `READY <name>@<hash>` | `set_active_instance` with that exact id. Verify with `execute_code { return UnityEngine.Application.dataPath; }`. Continue the task. |
-| `READY_WITH_ERRORS <id>` | Route to it as above, then fix the printed errors (Step 3) and recompile over MCP with `refresh_unity`, then `read_console` for errors. |
-| `COMPILE_ERRORS` | This is Safe Mode: the Editor is parked at the Safe Mode prompt with an idle log, and MCP never came up. `-ignorecompilererrors` doesn't avoid this in Unity 6, so don't bother with it. Fix the printed errors (Step 3). Then restart **only this worktree's Editor**: `kill <pid>` using the pid on the final line, and run Step 1 again in the background. Safe Mode only recompiles when its window gets focus, and you don't drive OS input, so restarting is the reliable path. |
-| `EXITED` | Read the log tail it printed (license, crash, a locked project). If another Editor already has this project open, attach to that one instead. Otherwise relaunch once. |
+| `READY <name>@<hash>` | `set_active_instance` with that exact id. Verify with `execute_code { return UnityEngine.Application.dataPath + " " + UnityEditor.EditorUtility.scriptCompilationFailed; }`, which should give your worktree and `False`. If it's `True`, `read_console` for errors, fix, and `refresh_unity`. Continue the task. |
+| `COMPILE_ERRORS` | Safe Mode: the latest compile has errors, the log went idle, and MCP never came up. (`-ignorecompilererrors` doesn't avoid this in Unity 6.) Fix the printed errors (Step 3), then re-run the script with **`--restart`** in the background. It stops only this worktree's Editor, waits for it to exit, and relaunches. Safe Mode only recompiles on window focus, and you don't drive OS input, so restarting is the reliable path. |
+| `EXITED` | Read the log tail it printed (license, crash, "project already open"). Relaunch once with `--launch`; if it exits again, report the log line. |
 | `TIMEOUT` | Read the end of the log. If it's still importing (asset/script progress lines still moving), re-run Step 1. Otherwise report the last meaningful log line. |
 
 ## Step 3 — fixing compile errors

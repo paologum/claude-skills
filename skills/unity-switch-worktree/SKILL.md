@@ -81,36 +81,19 @@ editor_pid=$(pgrep -f "Unity\.app/Contents/MacOS/Unity -projectPath" | head -1)
 - **Save the user's work first if there might be unsaved scene edits.** If the Editor is currently focused and you're not sure, warn the user before killing and give them 10 seconds to `Cmd+S`.
 - Wait until `pgrep -f "Unity\.app/Contents/MacOS/Unity -projectPath"` returns empty before launching the new one, so a switch doesn't silently leave you with two Editors. The old Editor's status file disappears shortly after it exits.
 
-### Step 3 — launch the new Editor detached
+### Step 3 — launch the new Editor and wait for it in the background
+
+Launch **and** wait in one background call through `/unity-editor-up`'s script. Its path is the `unity-editor-up` skill's base directory plus `/unity_editor_up.py`, i.e. the sibling `skills/unity-editor-up/` of this skill's base directory. Run it with Bash `run_in_background: true`:
 
 ```bash
-mkdir -p "<target>/test-results"
-nohup "$unity" -projectPath "<target>" > "<target>/test-results/editor.log" 2>&1 &
-disown
+python3 <plugin>/skills/unity-editor-up/unity_editor_up.py --project "<target>" --launch
 ```
 
-Editor startup on a fresh `Library/` can take 2–10 minutes (asset import). Do not wait synchronously in one long Bash call — you'll block the conversation and burn the tool timeout. Instead go to Step 4.
+It starts the Editor with its own `-logFile`, so compile errors are visible. It ignores other worktrees' Editors and exits once with `READY <Name@hash>`, `COMPILE_ERRORS` (Safe Mode), `EXITED` or `TIMEOUT`, and the harness wakes the session then. Keep working while it runs. Don't `nohup` Unity yourself, don't poll, and don't end the turn on a timer. For `COMPILE_ERRORS`, follow `/unity-editor-up` Step 2 (fix, then `--restart`).
 
-### Step 4 — wait for the MCP bridge to appear, correctly
+### Step 4 — take the instance id from the wait result
 
-The check is the MCP resource `mcpforunity://instances`. Two forms:
-
-**When you have `ReadMcpResourceTool` in your toolset**, call it directly and inspect
-`data.instances[]` for one whose `path` is under the target worktree. When it appears,
-capture its full `id` (e.g. `github-issue-133-7904c4@c419cb5374192e4d`). Match on `path`,
-not `name` — two worktrees of the same repo report the same project name.
-
-**When you don't have that tool** (rare — usually deferred until after ToolSearch), read
-the status file the Editor publishes:
-
-```bash
-grep -l "<target>/Assets" ~/.unity-mcp/unity-mcp-status-*.json
-```
-
-Either way, **don't wrap it in a shell polling loop.** Unity import can take 2-10 minutes;
-Run `/unity-editor-up` instead: its wait script runs in the background and wakes the session the moment the Editor registers, hits compile errors / Safe Mode, or exits. Never end the turn on a timer to wait for an import.
-
-If the Editor process died before the bridge came up, check `<target>/test-results/editor.log` for compile errors or license failures before retrying.
+`READY <Name@hash>` names the instance to bind. If you need to cross-check, read `mcpforunity://instances` once and match `path` to `<target>/Assets`.
 
 ### Step 5 — rebind the MCP session
 
