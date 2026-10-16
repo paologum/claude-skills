@@ -34,6 +34,7 @@ The PR is **approved** when `gh pr view <N> --json reviewDecision,latestReviews`
 - **Verify locally, don't wait for CI.** Merge the base branch in and run the project's tests locally (Step 5). If they pass, push and merge right away, without waiting for CI on the pushed head. If a local test fails, fix it first, or report it if it also fails on the base branch.
 - **Then merge (Step 8).** This applies even without `--merge`, as long as the approval came from a human reviewer.
 - **Stacked PR** (base isn't the default branch): don't merge into the parent branch. Report "approved, will merge once #<parent> lands" and stop. When the parent merges, GitHub retargets this PR to the default branch, and the next event or sweep merges it.
+- **Just retargeted** (the parent merged): before anything else, merge `origin/<default>` into your branch. The parent landed as a **squash**, so your branch still carries its original commits. Git usually resolves this cleanly by keeping your side, but check for semantic conflicts too: code from the parent you call into may have changed during its review. Run the tests locally, push, and continue the round.
 
 ## Exit condition
 
@@ -150,15 +151,13 @@ Merge only when **all** hold — otherwise report which one failed and stop:
 
 If the base branch requires status checks, don't wait on them and never bypass them: use `gh pr merge --auto` (merges when checks pass) and report that, or stop if auto-merge is disabled. **Never `--admin`.**
 
-**Before deleting the branch, retarget PRs stacked on it.** GitHub only retargets dependent PRs automatically when its own merge button deletes the branch. If `--delete-branch` (or any API delete) removes a branch that another open PR uses as its base, GitHub **closes** that PR. So first run:
+**Let GitHub delete the branch, so stacked PRs survive.** When GitHub deletes a merged branch itself, any open PR built on that branch is **retargeted** to the merged PR's base. When the branch is deleted any other way, including `gh pr merge --delete-branch`, which deletes it in a separate API call, those PRs are **closed**. So:
 
-```bash
-gh pr list --base <head-branch> --state open --json number --jq '.[].number'
-```
+1. Check `gh api repos/<o>/<r> --jq .delete_branch_on_merge`.
+2. **If it's `true`:** run `gh pr merge <N> --squash` **without `--delete-branch`**. GitHub deletes the branch and retargets the stack. If you need tidy local cleanup, remove the local branch/worktree yourself afterwards.
+3. **If it's `false`:** first retarget every open PR whose base is this branch (`gh pr list --base <head-branch> --state open` → `gh pr edit <M> --base <default-branch>`), then `gh pr merge <N> --squash --delete-branch`. If any retarget fails, merge without deleting the branch and report it.
 
-`gh pr edit <M> --base <default-branch>` each result, then merge. If retargeting fails, merge **without** `--delete-branch` and report it.
-
-Merge method: the repo's allowed method from `gh repo view --json squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed`, preferring squash, then merge commit. `gh pr merge <N> --squash --delete-branch` (drop `--delete-branch` if a worktree still has the branch checked out; remove the worktree first only if it's clean and yours).
+Merge method: the repo's allowed method from `gh repo view --json squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed`, preferring squash, then merge commit. Never `--admin`.
 
 ## Report
 

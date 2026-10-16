@@ -28,7 +28,13 @@ Transient tool failures (MCP reconnecting, Editor importing, Safe Mode, a flaky 
 
 ## Step 2 — isolate
 
-- Base = the default branch, or the head branch of `--stack-on <PR>`. `git fetch origin <base>`.
+- **Stack when the work depends on an open PR. Prefer that over waiting or duplicating code.** Choose the base like this:
+  - With `--stack-on <PR>`, use that PR's head branch.
+  - Otherwise, check for an open, unmerged PR whose code this issue needs. Signs of that: the issue links or names the PR, its parent issue has that PR open, or the change has to call or modify code that exists only on that PR's branch (`gh pr list --author @me --state open --json number,headRefName,files`, compared against what you'll touch). If you find one, **stack on it** and say why in one line.
+  - Otherwise, use the default branch.
+
+  Stack on at most one parent; if the work needs two, stack on the one closer to merging and mention the other. `git fetch origin <base>`.
+- **Stacking is safe here:** when the parent merges, GitHub retargets your PR to the default branch automatically, as long as the repo has "Automatically delete head branches" on and merges never use `--delete-branch` (see `/address-review` Step 8). Put `Stacked on #<parent>. Merge that first.` at the top of the PR body.
 - If the session is already in a worktree on a fresh branch for this work, use it. Otherwise create one: branch `<issue-number>-<kebab-slug>` (≤ 6 words), worktree as a sibling of the repo root or via the session's worktree tool, based on `origin/<base>`. Never build on an unrelated branch's HEAD.
 - Unity: **start this worktree's Editor now**, right after creating the worktree and before reading code or implementing, with `/unity-editor-up`. Its wait runs in the background, so the first import (minutes on a fresh `Library/`) overlaps steps 1–3 instead of blocking step 4. When it reports `COMPILE_ERRORS` or Safe Mode, follow that skill's recovery. If the base branch itself is broken, that skill says how to find or land the fix. Route MCP only to **this** worktree's instance (`set_active_instance` + verify `Application.dataPath`). Never close or switch another session's Editor.
 
