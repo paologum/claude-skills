@@ -17,7 +17,7 @@ One call replaces the loop the user otherwise types by hand every round: *"addre
 - **review comments:** Steps 1–7
 - **CI failure:** fix and verify locally, then Steps 6–7
 - **merge conflict:** Step 4, then Steps 5–7
-- **approval** (`reviewDecision == APPROVED`, see "Approved PRs" below): address any non-blocking nits with Steps 1–6, then **merge with Step 8. Don't re-request.** The user has asked for approved PRs to merge without waiting for them.
+- **approval** (`reviewDecision == APPROVED`, see "Approved PRs" below): address any non-blocking nits with Steps 1–6, verify locally, then **merge with Step 8 without waiting for CI. Don't re-request.** The user has asked for approved PRs to merge without waiting for them.
 
 Guards that still apply:
 - **Merge only an approved PR**, and only through Step 8's checks. Never merge on an event that merely says "approved" without confirming `reviewDecision` yourself.
@@ -31,6 +31,7 @@ Guards that still apply:
 The PR is **approved** when `gh pr view <N> --json reviewDecision,latestReviews` shows `reviewDecision == APPROVED` and no human reviewer's latest review is `CHANGES_REQUESTED`. An approved PR is finished from the reviewer's side, so:
 - **Never re-request review** on it. Re-requesting an approver restarts a review they already gave, which the user explicitly doesn't want.
 - **Nits in the approving review or after it:** fix the ones worth fixing in a new commit; file issues for bigger ones. Post the point → resolution reply comment, which is fine, but skip Step 7's re-request.
+- **Verify locally, don't wait for CI.** Merge the base branch in and run the project's tests locally (Step 5). If they pass, push and merge right away, without waiting for CI on the pushed head. If a local test fails, fix it first, or report it if it also fails on the base branch.
 - **Then merge (Step 8).** This applies even without `--merge`, as long as the approval came from a human reviewer.
 - **Stacked PR** (base isn't the default branch): don't merge into the parent branch. Report "approved, will merge once #<parent> lands" and stop. When the parent merges, GitHub retargets this PR to the default branch, and the next event or sweep merges it.
 
@@ -143,11 +144,19 @@ Merge only when **all** hold — otherwise report which one failed and stop:
 
 - `reviewDecision == APPROVED`. Re-query after pushing, because a new commit can dismiss a stale approval if the repo requires it. If it was dismissed, re-request that one approver; that is the only case where an approved PR gets re-requested.
 - The base is the repo's default branch (see "Stacked PR" above).
-- CI on the **current head** has passed. If you just pushed, wait for the checks with one background `gh pr checks <N> --watch` (Bash `run_in_background`) instead of ending the turn. A failing check is a CI failure to fix first, unless it's the known flaky runner going offline, which you should report.
+- The project's tests pass **locally** on the exact commit you're merging (Step 5). Don't wait for CI on an approved PR. If CI has already *finished* with a real failure on this head, fix that first; still-pending checks don't block the merge.
 - `mergeable == MERGEABLE` after your push. GitHub reports `UNKNOWN` for a few seconds while it recomputes — re-query (up to ~5 times, a few seconds apart) before treating it as a failure.
 - Local verification in step 5 passed.
 
 If the base branch requires status checks, don't wait on them and never bypass them: use `gh pr merge --auto` (merges when checks pass) and report that, or stop if auto-merge is disabled. **Never `--admin`.**
+
+**Before deleting the branch, retarget PRs stacked on it.** GitHub only retargets dependent PRs automatically when its own merge button deletes the branch. If `--delete-branch` (or any API delete) removes a branch that another open PR uses as its base, GitHub **closes** that PR. So first run:
+
+```bash
+gh pr list --base <head-branch> --state open --json number --jq '.[].number'
+```
+
+`gh pr edit <M> --base <default-branch>` each result, then merge. If retargeting fails, merge **without** `--delete-branch` and report it.
 
 Merge method: the repo's allowed method from `gh repo view --json squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed`, preferring squash, then merge commit. `gh pr merge <N> --squash --delete-branch` (drop `--delete-branch` if a worktree still has the branch checked out; remove the worktree first only if it's clean and yours).
 
