@@ -74,9 +74,13 @@ Unless `--draft-only`:
 - Request reviewers: the CODEOWNERS owners of the changed paths minus yourself (`gh pr edit <N> --add-reviewer …`).
 - Post nothing else — the description carries the evidence.
 
+## Step 8 — release the Editor
+
+Unity: once the PR is up (this applies to `--draft-only` too) and every capture is done, stop this worktree's Editor with `/unity-editor-up` Step 4: save over MCP, then `--stop`. Idle Editors left open by finished sessions use up the licensing client's connection limit, and new Editors then fail with "Connection Lost". Skip this when you end on exit condition 2 (blocked on the user), since work resumes there. Later review rounds relaunch it with `/unity-editor-up`.
+
 ## Report
 
-End with: PR link, the acceptance-criteria → evidence table, test results (command + counts), self-review findings and their resolutions, follow-up issues filed, and who was requested. Embed the key screenshots inline.
+End with: PR link, the acceptance-criteria → evidence table, test results (command + counts), self-review findings and their resolutions, follow-up issues filed, who was requested, and whether the Editor was stopped. Embed the key screenshots inline.
 
 ## Guardrails
 

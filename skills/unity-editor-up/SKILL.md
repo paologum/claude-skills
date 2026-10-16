@@ -1,6 +1,6 @@
 ---
 name: unity-editor-up
-description: Brings up a usable Unity Editor for the current worktree without stalling the session — launches this worktree's own Editor (never touching other worktrees' Editors), waits for it in the background so the session is woken the moment MCP registers, and recovers on its own from compile errors and Safe Mode (fix → recompile over MCP, or restart only its own Editor). Use whenever a session needs the Editor and it isn't registered yet — "open Unity on this worktree", "wait for Unity", "it's importing", "it's in safe mode", "Unity has compile errors", "the Editor isn't showing up in MCP", or at the start of any Unity task in a fresh worktree.
+description: Brings up a usable Unity Editor for the current worktree without stalling the session — launches this worktree's own Editor (never touching other worktrees' Editors), waits for it in the background so the session is woken the moment MCP registers, and recovers on its own from compile errors and Safe Mode (fix → recompile over MCP, or restart only its own Editor), and stops only its own Editor when the work is done so idle Editors don't exhaust the licensing client. Use whenever a session needs the Editor and it isn't registered yet — "open Unity on this worktree", "wait for Unity", "it's importing", "it's in safe mode", "Unity has compile errors", "the Editor isn't showing up in MCP", "close the Editor", "Unity Licensing Client connection lost", or at the start of any Unity task in a fresh worktree.
 allowed-tools: "Read Edit Bash Bash(python3 *) Bash(git *) Bash(gh *)"
 argument-hint: "[worktree path — defaults to the repo root of the cwd]"
 ---
@@ -54,6 +54,21 @@ Other worktrees' Editors belong to other sessions. Never close, kill or "switch"
 
    Cherry-pick an existing fix as its own first commit, and say so in the PR body. If there's none, write the smallest fix as a separate commit and flag it: it should land on the base branch on its own.
 3. **Your own code:** fix it, then let the recompile prove it.
+
+## Step 4 — stop it when the work is done
+
+An idle Editor isn't free. Each Editor's licensing client accepts at most 21 connections, and every Editor uses about 3 of them: the Editor plus its `AssetImportWorker` children. Once enough idle Editors pile up across parallel sessions, new ones get **"Connection Lost — the connection with the Unity Licensing Client has been lost"**, and the licensing log says `Maximum connection reach 21`.
+
+So when this session's Unity work is finished, close its Editor:
+
+1. Save over MCP. Exit Play mode, then save any dirty open scenes, e.g. `execute_code` with `EditorSceneManager.SaveOpenScenes()`.
+2. Stop it. This takes seconds, so it can run in the foreground:
+   ```bash
+   python3 <skill-base-dir>/unity_editor_up.py --project "$(git rev-parse --show-toplevel)" --stop
+   ```
+   It stops only this worktree's Editor, waits for it to exit, and prints `STOPPED`. If nothing was running, it does nothing.
+
+Relaunching later with Step 1 is cheap, because `Library/` stays warm. Don't stop the Editor while the session is blocked on a question to the user mid-task, since they're likely to continue there.
 
 ## Guardrails
 
