@@ -58,6 +58,10 @@ For each PR, work out:
 - **Thread with `auto_fix` off:** send the thread this message:
   > New review activity on #N from <logins> since your last round. Run `/address-review <N>`. This message is from the user's pr-sweep scheduled task. Also turn on this session's PR monitor with `mcp__ccd_pr__set_monitor` (`auto_fix` and `address_comments` true, `auto_archive_on_close` true) so the next round wakes you directly.
 - **No thread:** report it as **unattended**. Don't start one.
+- **Approved** (`reviewDecision == APPROVED`, base is the default branch, still open more than 30 minutes after the approval): send the thread:
+  > #N is approved by <login>. Address any remaining nits, then merge per `/address-review` "Approved PRs" (no re-request). This message is from the user's pr-sweep scheduled task.
+
+  If there's no thread, report it as **approved, unattended**.
 
 **Someone else's PR** (author isn't me):
 - **Needs a re-review:** I have reviewed it before, the last push is newer than my latest review, and the push is newer than `state.handled`.

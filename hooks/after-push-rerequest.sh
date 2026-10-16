@@ -43,8 +43,10 @@ dir="$(printf '%s' "$cmd" | sed -nE 's/.*git[[:space:]]+-C[[:space:]]+([^[:space
 dir="${dir//\"/}"; dir="${dir//\'/}"; dir="${dir/#\~/$HOME}"
 [ -n "$dir" ] && cd "$dir" 2>/dev/null
 
-pr_json="$(t 10 gh pr view "$branch" --json number,state,reviews,reviewRequests 2>/dev/null)" || exit 0
+pr_json="$(t 10 gh pr view "$branch" --json number,state,reviews,reviewRequests,reviewDecision 2>/dev/null)" || exit 0
 [ "$(printf '%s' "$pr_json" | jq -r '.state')" = "OPEN" ] || exit 0
+# An approved PR is done from the reviewer's side: re-requesting would restart their review.
+[ "$(printf '%s' "$pr_json" | jq -r '.reviewDecision // empty')" = "APPROVED" ] && exit 0
 
 me="$(t 5 gh api user --jq .login 2>/dev/null)"
 [ -n "$me" ] || exit 0
