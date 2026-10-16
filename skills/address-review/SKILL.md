@@ -149,6 +149,14 @@ Merge only when **all** hold — otherwise report which one failed and stop:
 
 If the base branch requires status checks, don't wait on them and never bypass them: use `gh pr merge --auto` (merges when checks pass) and report that, or stop if auto-merge is disabled. **Never `--admin`.**
 
+**Before deleting the branch, retarget PRs stacked on it.** GitHub only retargets dependent PRs automatically when its own merge button deletes the branch. If `--delete-branch` (or any API delete) removes a branch that another open PR uses as its base, GitHub **closes** that PR. So first run:
+
+```bash
+gh pr list --base <head-branch> --state open --json number --jq '.[].number'
+```
+
+`gh pr edit <M> --base <default-branch>` each result, then merge. If retargeting fails, merge **without** `--delete-branch` and report it.
+
 Merge method: the repo's allowed method from `gh repo view --json squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed`, preferring squash, then merge commit. `gh pr merge <N> --squash --delete-branch` (drop `--delete-branch` if a worktree still has the branch checked out; remove the worktree first only if it's clean and yours).
 
 ## Report
