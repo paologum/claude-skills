@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Launch, restart or attach to one worktree's Unity Editor and wait until MCP can use it.
+"""Launch, restart, attach to or stop one worktree's Unity Editor and wait until MCP can use it.
 
 Run with Bash `run_in_background: true`: the harness re-invokes the session the
 moment this exits, so a session never guesses an import time, ends its turn on a
-timer, or needs the user to say "it's up".
+timer, or needs the user to say "it's up". `--stop` is quick and can run in the foreground.
 
 Final stdout line / exit code:
   0  READY <name>@<hash> port=<p> pid=<pid> log=<path>
+  0  STOPPED pid(s)=[...]             --stop: this worktree's Editor exited (or none was running)
   3  COMPILE_ERRORS (Safe Mode) ...   errors, the log went idle, MCP never registered
   4  EXITED ...                       the Editor process went away
   5  TIMEOUT ...                      nothing conclusive before --timeout
@@ -168,6 +169,12 @@ def alive(pid, proc):
         return True
 
 
+def children(pids):
+    """Direct children (AssetImportWorkers, shader compilers) of the given pids."""
+    out = subprocess.run(["ps", "-axo", "pid=,ppid="], capture_output=True, text=True).stdout
+    return [int(c) for c, p in (l.split() for l in out.splitlines() if l.strip()) if int(p) in pids]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--project", required=True, help="worktree root (contains Assets/ and ProjectSettings/)")
@@ -175,6 +182,9 @@ def main():
     mode.add_argument("--launch", action="store_true", help="start this worktree's Editor if none is running")
     mode.add_argument("--restart", action="store_true",
                       help="stop this worktree's Editor (only this one), wait for it to exit, launch again")
+    mode.add_argument("--stop", action="store_true",
+                      help="stop this worktree's Editor (only this one) and wait for it to exit; frees its "
+                           "licensing-client connections")
     ap.add_argument("--log", help="log for a launched Editor (default <project>/Logs/claude-editor.log)")
     ap.add_argument("--timeout", type=int, default=1500, help="seconds (fresh imports take minutes)")
     ap.add_argument("--idle", type=int, default=45,
@@ -188,15 +198,27 @@ def main():
     proc = None
     running = editors(project)
 
-    if a.restart and running:
+    if (a.restart or a.stop) and running:
+        # Workers each hold a licensing connection, so an orphaned one still counts against the cap.
+        kids = children(set(running))
         for pid in running:
             os.kill(pid, signal.SIGTERM)
         while any(alive(p, None) for p in running) or editors(project):
             if time.time() - t0 > 120:
-                done(4, f"EXITED? Editor pid(s) {list(running)} did not stop within 120s; not relaunching")
+                done(4, f"EXITED? Editor pid(s) {list(running)} did not stop within 120s"
+                        + ("" if a.stop else "; not relaunching"))
             time.sleep(1)
+        for k in kids:
+            # Re-check the command line: a reaped pid can be reused by an unrelated process.
+            cmd = subprocess.run(["ps", "-p", str(k), "-o", "command="], capture_output=True, text=True).stdout
+            if project in cmd:
+                os.kill(k, signal.SIGTERM)
+        if a.stop:
+            done(0, f"STOPPED pid(s)={list(running)}")
         print(f"STOPPED pid(s)={list(running)}", flush=True)
         running = {}
+    elif a.stop:
+        done(0, f"STOPPED pid(s)=[] no Editor was running for {project}")
 
     if running:
         pid, log = next(iter(running.items()))
