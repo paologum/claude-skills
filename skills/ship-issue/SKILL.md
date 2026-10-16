@@ -9,7 +9,7 @@ argument-hint: "<issue-url-or-number> [--stack-on <PR>] [--draft-only] [extra in
 
 The user's recurring `/goal` prompts all restate the same bar: *a PR with screenshots and videos proving the acceptance criteria, tests, prefabs not runtime UI, a description a human can read, self-reviewed, then request review — and don't come back until it's up.* This skill is that bar.
 
-**Authorization.** When the user typed `/ship-issue` or asked for the issue to be worked into a PR, that authorizes: creating a worktree + branch, committing, pushing that branch, opening the PR, posting the acceptance-criteria comment on the issue, filing follow-up issues, and requesting reviewers. If you reached this skill on your own (a hook suggestion) from a prompt that didn't ask for a PR, confirm before the first push. Nothing here authorizes merging.
+**Authorization.** When the user typed `/ship-issue` or asked for the issue to be worked into a PR, that authorizes: creating a worktree + branch, committing, pushing that branch, opening the PR, posting the acceptance-criteria comment on the issue, filing follow-up issues, requesting reviewers, and turning on this session's PR monitor (Step 7) so it answers later review rounds itself. If you reached this skill on your own (a hook suggestion) from a prompt that didn't ask for a PR, confirm before the first push. Nothing here authorizes merging.
 
 ## Exit condition
 
@@ -74,13 +74,19 @@ Unless `--draft-only`:
 - Request reviewers: the CODEOWNERS owners of the changed paths minus yourself (`gh pr edit <N> --add-reviewer …`).
 - Post nothing else — the description carries the evidence.
 
+Then make **this session the PR's attached thread**, so review feedback comes back here and is acted on immediately (this applies to `--draft-only` too). Do it whenever the `mcp__ccd_pr__*` tools exist:
+
+1. `mcp__ccd_pr__get_status`. If this session isn't bound to the PR you just opened, call `mcp__ccd_pr__bind_pr` with its URL.
+2. `mcp__ccd_pr__set_monitor` with `url`, `auto_fix: true`, `address_comments: true` and `auto_archive_on_close: true`. The app then wakes this session with a `<ci-monitor-event>` on review comments, CI failures and merge conflicts, and archives the thread once the PR merges or closes. Each event is handled by `/address-review` (see its "Woken by the PR monitor" section).
+3. **Link the thread from the PR.** Read this session's `link` with `mcp__ccd_session_mgmt__get_session` (`session_id: "self"`) and append one line at the end of the PR body: `Claude thread: <link>`. That lets you jump from the PR on GitHub to the thread that owns it. Skip this if `link` is absent; the organization has app links turned off.
+
 ## Step 8 — release the Editor
 
 Unity: once the PR is up (this applies to `--draft-only` too) and every capture is done, stop this worktree's Editor with `/unity-editor-up` Step 4: save over MCP, then `--stop`. Idle Editors left open by finished sessions use up the licensing client's connection limit, and new Editors then fail with "Connection Lost". Skip this when you end on exit condition 2 (blocked on the user), since work resumes there. Later review rounds relaunch it with `/unity-editor-up`.
 
 ## Report
 
-End with: PR link, the acceptance-criteria → evidence table, test results (command + counts), self-review findings and their resolutions, follow-up issues filed, who was requested, and whether the Editor was stopped. Embed the key screenshots inline.
+End with: PR link, the acceptance-criteria → evidence table, test results (command + counts), self-review findings and their resolutions, follow-up issues filed, who was requested, whether the PR monitor is on (or why not), and whether the Editor was stopped. Embed the key screenshots inline.
 
 ## Guardrails
 
