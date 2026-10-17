@@ -28,7 +28,13 @@ Guards that still apply:
 
 ## Approved PRs
 
-The PR is **approved** when `gh pr view <N> --json reviewDecision,latestReviews` shows `reviewDecision == APPROVED` and no human reviewer's latest review is `CHANGES_REQUESTED`. An approved PR is finished from the reviewer's side, so:
+The PR is **approved** when `gh pr view <N> --json reviewDecision,latestReviews` shows `reviewDecision == APPROVED` and no human reviewer's latest review is `CHANGES_REQUESTED`.
+
+**Review tiers (when the repo has `.github/review-policy.yml`).** The PR's label says which approval it needs. If the label is missing, compute the tier from the policy.
+- **`review:human`:** approved means `reviewDecision == APPROVED` with an approval from one of the policy's `human_required.approvers`, as above.
+- **`review:ai`:** approved means the policy's `ai_approval.check_name` check run (e.g. `claude-review / verdict`) has conclusion **success** on the PR's **current head SHA** (`gh api repos/<o>/<r>/commits/<head>/check-runs`), and no human's latest review is CHANGES_REQUESTED. Don't re-request a human for a review:ai PR. If the AI verdict is a failure, run a normal review round on its findings.
+- **Re-check the tier on every push.** If your changes now touch a `review:human` path or a network attribute, the PR becomes `review:human`. Set the label and request the approver instead of merging on the AI verdict.
+ An approved PR is finished from the reviewer's side, so:
 - **Never re-request review** on it. Re-requesting an approver restarts a review they already gave, which the user explicitly doesn't want.
 - **Nits in the approving review or after it:** fix the ones worth fixing in a new commit; file issues for bigger ones. Post the point → resolution reply comment, which is fine, but skip Step 7's re-request.
 - **Verify locally, don't wait for CI.** Merge the base branch in and run the project's tests locally (Step 5). If they pass, push and merge right away, without waiting for CI on the pushed head. If a local test fails, fix it first, or report it if it also fails on the base branch.
