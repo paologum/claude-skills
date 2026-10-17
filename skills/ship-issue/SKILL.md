@@ -77,7 +77,8 @@ Use `/pr-description`, then make sure the body:
 Unless `--draft-only`:
 
 - `gh pr ready <N>`.
-- Request reviewers: the CODEOWNERS owners of the changed paths minus yourself (`gh pr edit <N> --add-reviewer …`).
+- **Review tier:** if the repo has `.github/review-policy.yml`, compute the tier from your diff (paths, network-attribute lines, size) and set the `review:human` or `review:ai` label. Request the policy's human approvers **only for `review:human`**. A `review:ai` PR is reviewed by the AI review workflow and merges on its verdict.
+- Without a policy: request reviewers from the CODEOWNERS owners of the changed paths, minus yourself (`gh pr edit <N> --add-reviewer …`).
 - Post nothing else — the description carries the evidence.
 
 Then make **this session the PR's attached thread**, so review feedback comes back here and is acted on immediately (this applies to `--draft-only` too). Do it whenever the `mcp__ccd_pr__*` tools exist:

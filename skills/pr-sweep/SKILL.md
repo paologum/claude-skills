@@ -58,7 +58,7 @@ For each PR, work out:
 - **Thread with `auto_fix` off:** send the thread this message:
   > New review activity on #N from <logins> since your last round. Run `/address-review <N>`. This message is from the user's pr-sweep scheduled task. Also turn on this session's PR monitor with `mcp__ccd_pr__set_monitor` (`auto_fix` and `address_comments` true, `auto_archive_on_close` true) so the next round wakes you directly.
 - **No thread:** report it as **unattended**. Don't start one.
-- **Approved** (`reviewDecision == APPROVED`, no human's latest review is CHANGES_REQUESTED):
+- **Approved.** With a `.github/review-policy.yml`, this follows the PR's tier: a `review:human` PR needs a human approver's APPROVE, and a `review:ai` PR needs the policy's AI verdict check to pass on the current head. Without a policy file, approved means `reviewDecision == APPROVED`. Either way, no human's latest review is CHANGES_REQUESTED:
   - **Stacked** (base isn't the default branch): skip it. It merges after its parent lands and GitHub retargets it.
   - **Clean.** All of these hold:
     - Read the approving review and every review or comment after it. They contain **nothing actionable**: only "no findings", awareness notes, or items explicitly marked minor/acceptable with no change requested.
