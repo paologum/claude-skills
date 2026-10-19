@@ -70,7 +70,7 @@ So when this session's Unity work is finished, close its Editor:
    ```
    It stops only this worktree's Editor, waits for it to exit, and prints `STOPPED`. If nothing was running, it does nothing.
 
-Stop it at every point where this session will sit waiting: after opening a PR, after pushing a review round, or when handing off. A thread that keeps an idle Editor open while it waits on review holds a slot another session is queued for. Relaunching later with Step 1 is cheap, because `Library/` stays warm. Don't stop the Editor while the session is blocked on a question to the user mid-task, since they're likely to continue there.
+Stop it at every point where this session will sit waiting: after opening a PR, after pushing a review round, or when handing off. A thread that keeps an idle Editor open while it waits on review holds a slot another session is queued for. Relaunching later with Step 1 is cheap, because `Library/` stays warm. That includes waiting on a question to the user: save, then stop. Editor slots are shared, and a blocked thread can wait for hours.
 
 ## Guardrails
 

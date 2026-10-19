@@ -108,7 +108,8 @@ def all_editors():
             continue
         m = path_re.search(cmd)
         if m:
-            found[int(pid)] = m.group(1).rstrip("/")
+            # MPPM virtual players run from <project>/Library/VP/<id>; they belong to that project's slot.
+            found[int(pid)] = re.sub(r"/Library/VP/.*$", "", m.group(1).rstrip("/"))
     return found
 
 
@@ -119,20 +120,18 @@ def free_gb():
             with open("/proc/meminfo") as f:
                 kb = int(re.search(r"MemAvailable:\s+(\d+)", f.read()).group(1))
             return kb / 1048576
-        out = subprocess.run(["vm_stat"], capture_output=True, text=True).stdout
-        page = int(re.search(r"page size of (\d+)", out).group(1))
-        pages = sum(int(re.search(rf"{k}:\s+(\d+)", out).group(1))
-                    for k in ("Pages free", "Pages inactive", "Pages speculative"))
-        return pages * page / 2**30
+        # vm_stat's free pages undercount what macOS can reclaim (compressed, purgeable, file cache);
+        # memorystatus_level is the kernel's own percent-available figure.
+        level, total = (int(subprocess.run(["sysctl", "-n", k], capture_output=True, text=True).stdout)
+                        for k in ("kern.memorystatus_level", "hw.memsize"))
+        return total * level / 100 / 2**30
     except (OSError, AttributeError, ValueError):
         return None
 
 
 def slot_status():
-    eds = all_editors()
-    mem = free_gb()
-    holders = sorted(set(eds.values()))
-    return len(eds), slot_cap(), mem, holders
+    holders = sorted(set(all_editors().values()))
+    return len(holders), slot_cap(), free_gb(), holders
 
 
 def slot_line(used, cap, mem, holders):
@@ -140,13 +139,18 @@ def slot_line(used, cap, mem, holders):
     return f"used={used} cap={cap} free_gb={m} holders={[os.path.basename(h) for h in holders]}"
 
 
+def slot_lock():
+    os.makedirs(STATUS_DIR, exist_ok=True)
+    lock = open(SLOT_LOCK, "w")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    return lock
+
+
 def acquire_slot(min_free_gb, timeout):
     """Block until an Editor slot is free; return the held lock (release after launching)."""
-    os.makedirs(STATUS_DIR, exist_ok=True)
     start, last = time.time(), None
     while True:
-        lock = open(SLOT_LOCK, "w")
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        lock = slot_lock()
         used, cap, mem, holders = slot_status()
         # Memory only gates the second Editor onward; one must always be able to start.
         if used < cap and (used == 0 or mem is None or mem >= min_free_gb):
@@ -265,7 +269,7 @@ def children(pids):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--project", required=True, help="worktree root (contains Assets/ and ProjectSettings/)")
+    ap.add_argument("--project", help="worktree root (contains Assets/ and ProjectSettings/)")
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--launch", action="store_true", help="start this worktree's Editor if none is running")
     mode.add_argument("--restart", action="store_true",
@@ -286,6 +290,8 @@ def main():
 
     if a.slots:
         done(0, "SLOTS " + slot_line(*slot_status()))
+    if not a.project:
+        ap.error("--project is required")
 
     project = os.path.realpath(a.project.rstrip("/"))
     if not os.path.isdir(os.path.join(project, "Assets")):
@@ -293,6 +299,9 @@ def main():
     t0 = time.time()
     proc = None
     running = editors(project)
+    # A restart replaces an Editor this session already had, so it keeps the slot: hold the lock
+    # across stop and relaunch and skip the cap check, or a queued session could take it mid-restart.
+    lock = slot_lock() if a.restart and running else None
 
     if (a.restart or a.stop) and running:
         # Workers each hold a licensing connection, so an orphaned one still counts against the cap.
@@ -326,7 +335,7 @@ def main():
         log = a.log or os.path.join(project, "Logs", "claude-editor.log")
         os.makedirs(os.path.dirname(log), exist_ok=True)
         # Held until the new Editor shows in ps, so two waiting sessions can't both take the last slot.
-        lock = acquire_slot(a.min_free_gb, a.slot_timeout)
+        lock = lock or acquire_slot(a.min_free_gb, a.slot_timeout)
         open(log, "w").close()
         since = time.time()  # after any --restart stop, so the old Editor's heartbeats don't count
         proc = subprocess.Popen([exe, "-projectPath", project, "-logFile", log],

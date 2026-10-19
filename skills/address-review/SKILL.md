@@ -108,7 +108,7 @@ For nits on an approved PR, default to **Fix** — they're cheap and the user us
 
 - Make the fixes. Match surrounding style; keep the diff to the review's scope.
 - Run the project's real checks **locally** — never push-and-wait on CI:
-  - Unity: `/run-playmode` / `mcp__UnityMCP__run_tests` against the warm Editor, else `/unity-test` batchmode. If this worktree has no Editor registered yet, bring one up with `/unity-editor-up` (background wait, Safe Mode recovery) rather than waiting on a timer. Run the classes the change touches, then the full EditMode suite. Once the round is pushed (or merged), stop this worktree's Editor with `/unity-editor-up` Step 4, so it doesn't hold an Editor slot while the PR waits on the next review.
+  - Unity: `/run-playmode` / `mcp__UnityMCP__run_tests` against the warm Editor, else `/unity-test` batchmode. If this worktree has no Editor registered yet, bring one up with `/unity-editor-up` (background wait, Safe Mode recovery) rather than waiting on a timer. Run the classes the change touches, then the full EditMode suite.
   - Other stacks: the test/lint/build commands the repo defines.
 - A test that fails identically on the base branch is pre-existing: note it, don't block on it.
 - If a fix changes UI, re-capture the affected screens (`/pr-screenshot` or `/unity-e2e-verify`) — stale screenshots in a PR are worse than none.
@@ -144,6 +144,8 @@ Local verification: <suite> <passed>/<total>[; pre-existing failure: <name>, fai
   ```
 - **Re-request review** (unless `--no-rerequest`, or the PR is approved; see "Approved PRs"): every non-self, non-bot user who submitted a review on this PR; if nobody has, the CODEOWNERS owners for the changed paths minus yourself. `gh pr edit <N> --add-reviewer <login>[,<login>]` — this re-requests even after a prior review.
 - If the PR is a draft and the user's request implies it's ready ("publish", "open it", "request review"), `gh pr ready <N>` first.
+
+**Unity: release the Editor.** After the reply is posted (and any re-captures are done), stop this worktree's Editor with `/unity-editor-up` Step 4. Do this again after Step 8 if it merges. Editor slots are shared, and the PR may wait hours for the next review.
 
 ## Step 8 — merge (with `--merge`, or whenever the PR is approved)
 
