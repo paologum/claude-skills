@@ -20,6 +20,21 @@ Do not end the turn until one of these holds, and say which:
 
 Transient tool failures (MCP reconnecting, Editor importing, Safe Mode, a flaky network call) are not blockers. Handle them and keep going. Waiting for Unity is never a reason to end the turn or ask the user whether it's up: `/unity-editor-up`'s background wait wakes the session when there's something to act on. Don't end a turn on a `ScheduleWakeup` timer to wait for an import.
 
+## Step 0 — claim the issue
+
+Parallel threads and orchestrators draw from one issue pool, so the claim lives on GitHub, where every session and person can see it, and not in any session's memory.
+
+1. **Check it's free.** First, if this session already owns the claim, carry on: the issue is assigned to you and its `<N>-*` branch or PR is this worktree's (a resumed or re-typed run). Otherwise stop and report, without starting, if any of these holds:
+   - the issue has the label `status:in-progress` or `blocked:decision`
+   - it's assigned to someone other than you
+   - an open PR fixes it (`gh pr list --state open --search "<N> in:body"`, then check the body says Fixes/Closes #N) or has a branch named `<N>-*` (`git ls-remote --heads origin '<N>-*'`)
+   - another non-archived session's title names `#<N>` (`mcp__ccd_session_mgmt__list_sessions`, excluding this session's own id from `get_session` with `session_id: "self"`)
+2. **Claim it** in one command: `gh issue edit <N> --add-label status:in-progress --remove-label status:offered --add-assignee @me`. Create the label first if the repo doesn't have it. Do the same for each bundled issue the PR will fix. Then title this session `#<N> <issue title>` (`set_session_title`), so other sessions' checks and `/dispatch` can see who holds it.
+3. **Blocked on the user** (exit condition 2): add `blocked:decision` to the issue and post the question as an issue comment, with the options and your recommendation, so decisions collect in one place. Remove the label once answered.
+4. **Abandoning** (out of scope, duplicate, someone else took it): remove `status:in-progress` and your assignment.
+
+A merged PR closes the issue, so the label needs no cleanup then.
+
 ## Step 1 — understand the issue
 
 - `gh issue view <N> --json number,title,body,labels,comments` plus any parent/sibling issues or specs it links. Read the comments — scope is often refined there.
@@ -89,7 +104,7 @@ Then make **this session the PR's attached thread**, so review feedback comes ba
 
 ## Step 8 — release the Editor
 
-Unity: once the PR is up (this applies to `--draft-only` too) and every capture is done, stop this worktree's Editor with `/unity-editor-up` Step 4: save over MCP, then `--stop`. Idle Editors left open by finished sessions use up the licensing client's connection limit, and new Editors then fail with "Connection Lost". Skip this when you end on exit condition 2 (blocked on the user), since work resumes there. Later review rounds relaunch it with `/unity-editor-up`.
+Unity: once the PR is up (this applies to `--draft-only` too) and every capture is done, stop this worktree's Editor with `/unity-editor-up` Step 4: save over MCP, then `--stop`. Idle Editors left open by finished sessions use up the licensing client's connection limit, and new Editors then fail with "Connection Lost". Stop it on exit condition 2 (blocked on the user) too: a blocked thread can wait hours, and Editor slots are shared. Save first; relaunching with a warm `Library/` takes about a minute. Later review rounds relaunch it with `/unity-editor-up`.
 
 ## Report
 

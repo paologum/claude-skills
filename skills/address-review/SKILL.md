@@ -145,6 +145,8 @@ Local verification: <suite> <passed>/<total>[; pre-existing failure: <name>, fai
 - **Re-request review** (unless `--no-rerequest`, or the PR is approved; see "Approved PRs"): every non-self, non-bot user who submitted a review on this PR; if nobody has, the CODEOWNERS owners for the changed paths minus yourself. `gh pr edit <N> --add-reviewer <login>[,<login>]` — this re-requests even after a prior review.
 - If the PR is a draft and the user's request implies it's ready ("publish", "open it", "request review"), `gh pr ready <N>` first.
 
+**Unity: release the Editor.** After the reply is posted (and any re-captures are done), stop this worktree's Editor with `/unity-editor-up` Step 4. Do this again after Step 8 if it merges. Editor slots are shared, and the PR may wait hours for the next review.
+
 ## Step 8 — merge (with `--merge`, or whenever the PR is approved)
 
 Merge only when **all** hold — otherwise report which one failed and stop:

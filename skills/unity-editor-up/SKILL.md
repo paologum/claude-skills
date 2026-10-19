@@ -31,6 +31,7 @@ The script:
 - reuses this worktree's Editor if one is already running, or launches one with its log at `Logs/claude-editor.log`
 - exits with one final line: `READY`, `COMPILE_ERRORS`, `EXITED`, `TIMEOUT` or `ERROR`
 - `READY` means this worktree's bridge heartbeat is live, so stale status files from old sessions can't fool it
+- **waits for an Editor slot before launching.** Parallel sessions share one machine, and each Editor takes 4–6 GB and licensing-client connections. The script launches only when fewer than the cap of Editors are running (any worktree) and at least `--min-free-gb` (default 4) is free. Until then it prints `WAITING_FOR_SLOT used=… cap=… holders=[…]` and waits in the background, which costs no tokens. The cap comes from `$UNITY_EDITOR_SLOTS`, else `~/.claude/unity-editor-slots`, else 3. `--slots` prints current usage and exits.
 
 The harness re-invokes the session when it exits, so keep working until then. Don't call `ScheduleWakeup`, don't poll in a loop, and don't end the turn just to wait.
 
@@ -43,6 +44,7 @@ Other worktrees' Editors belong to other sessions. Never close, kill or "switch"
 | `READY <name>@<hash>` | `set_active_instance` with that exact id. Verify with `execute_code { return UnityEngine.Application.dataPath + " " + UnityEditor.EditorUtility.scriptCompilationFailed; }`, which should give your worktree and `False`. If it's `True`, `read_console` for errors, fix, and `refresh_unity`. Continue the task. |
 | `COMPILE_ERRORS` | Safe Mode: the latest compile has errors, the log went idle, and MCP never came up. (`-ignorecompilererrors` doesn't avoid this in Unity 6.) Fix the printed errors (Step 3), then re-run the script with **`--restart`** in the background. It stops only this worktree's Editor, waits for it to exit, and relaunches. Safe Mode only recompiles on window focus, and you don't drive OS input, so restarting is the reliable path. |
 | `EXITED` | Read the log tail it printed (license, crash, "project already open"). Relaunch once with `--launch`; if it exits again, report the log line. |
+| `NO_SLOT` | Every slot stayed taken for `--slot-timeout` (4h). Report the holders it printed and do the parts of the task that don't need the Editor. Never stop another worktree's Editor to free a slot. |
 | `TIMEOUT` | Read the end of the log. If it's still importing (asset/script progress lines still moving), re-run Step 1. Otherwise report the last meaningful log line. |
 
 ## Step 3 — fixing compile errors
@@ -68,7 +70,7 @@ So when this session's Unity work is finished, close its Editor:
    ```
    It stops only this worktree's Editor, waits for it to exit, and prints `STOPPED`. If nothing was running, it does nothing.
 
-Relaunching later with Step 1 is cheap, because `Library/` stays warm. Don't stop the Editor while the session is blocked on a question to the user mid-task, since they're likely to continue there.
+Stop it at every point where this session will sit waiting: after opening a PR, after pushing a review round, or when handing off. A thread that keeps an idle Editor open while it waits on review holds a slot another session is queued for. Relaunching later with Step 1 is cheap, because `Library/` stays warm. That includes waiting on a question to the user: save, then stop. Editor slots are shared, and a blocked thread can wait for hours.
 
 ## Guardrails
 
